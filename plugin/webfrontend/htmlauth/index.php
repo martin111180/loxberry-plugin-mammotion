@@ -105,6 +105,7 @@ function action_message($mm_action) {
 }
 
 $mm_cfg = read_config($mm_cfgfile);
+$mm_page = (($_GET['page'] ?? '') === 'settings') ? 'settings' : 'status';
 $mm_message = "";
 $mm_message_ok = true;
 
@@ -112,6 +113,7 @@ $mm_message_ok = true;
 if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
 	$mm_action = $_POST['action'] ?? '';
 	if ($mm_action === 'save') {
+		$mm_page = 'settings';
 		$mm_cfg['enabled']  = isset($_POST['enabled']);
 		$mm_cfg['account']  = trim($_POST['account'] ?? '');
 		if (($_POST['password'] ?? '') !== '') {
@@ -230,12 +232,15 @@ if (($_GET['ajax'] ?? '') === 'live') {
 }
 
 // ---------------------------------------------------------------- Seite
-$navbar[1]['Name'] = tr('UI.NAV_SETTINGS');
+$navbar[1]['Name'] = tr('UI.NAV_STATUS');
 $navbar[1]['URL'] = 'index.php';
-$navbar[1]['active'] = true;
-$navbar[2]['Name'] = tr('UI.NAV_LOG');
-$navbar[2]['URL'] = '/admin/system/tools/logfile.cgi?logfile=' . urlencode($mm_logfile) . '&header=html&format=template';
-$navbar[2]['target'] = '_blank';
+$navbar[1]['active'] = $mm_page === 'status';
+$navbar[2]['Name'] = tr('UI.NAV_SETTINGS');
+$navbar[2]['URL'] = 'index.php?page=settings';
+$navbar[2]['active'] = $mm_page === 'settings';
+$navbar[3]['Name'] = tr('UI.NAV_LOG');
+$navbar[3]['URL'] = '/admin/system/tools/logfile.cgi?logfile=' . urlencode($mm_logfile) . '&header=html&format=template';
+$navbar[3]['target'] = '_blank';
 
 LBWeb::lbheader(tr('UI.TITLE'), "", "");
 ?>
@@ -257,9 +262,10 @@ LBWeb::lbheader(tr('UI.TITLE'), "", "");
 
 <?php if ($mm_message): ?><div class="mm-msg <?= $mm_message_ok ? 'mm-msg-ok' : 'mm-msg-bad' ?>"><?= h($mm_message) ?></div><?php endif; ?>
 
+<?php if ($mm_page === 'status'): ?>
 <h2><?= t('UI.STATUS') ?></h2>
 <div id="mm-live-status"><?php render_status_table(); ?></div>
-<form method="post" data-ajax="false" style="display:inline">
+<form method="post" action="index.php" data-ajax="false" style="display:inline">
 	<button type="submit" name="action" value="restart" data-inline="true" data-mini="true"><?= t('UI.BTN_RESTART') ?></button>
 	<button type="submit" name="action" value="stop" data-inline="true" data-mini="true"><?= t('UI.BTN_STOP') ?></button>
 </form>
@@ -271,8 +277,47 @@ LBWeb::lbheader(tr('UI.TITLE'), "", "");
 	<?= t('UI.HINT_RESET', '<code>' . h($mm_topic) . '/cmd/reset</code>', '<code>' . h($mm_topic . '/' . tr('UI.DEVICE_PLACEHOLDER') . '/cmd/reset') . '</code>') ?>
 </p>
 
-<h2><?= t('UI.SETTINGS') ?></h2>
-<form method="post" data-ajax="false">
+<script>
+// Status und Gerätewerte automatisch aktualisieren (Formular bleibt unberührt):
+// alle 5 s, solange auf eine Statusmeldung gewartet wird, sonst alle 30 s; pausiert im Hintergrund-Tab
+(function () {
+	var statusBox = document.getElementById('mm-live-status');
+	var devicesBox = document.getElementById('mm-live-devices');
+	if (!statusBox || !devicesBox || !window.fetch) return;
+	var waiting = <?= live_waiting() ? 'true' : 'false' ?>;
+	var timer = null;
+
+	function schedule() {
+		clearTimeout(timer);
+		timer = setTimeout(refresh, waiting ? 5000 : 30000);
+	}
+
+	function refresh() {
+		if (document.hidden) { schedule(); return; }
+		fetch('index.php?ajax=live', { credentials: 'same-origin', cache: 'no-store' })
+			.then(function (r) { return r.ok ? r.json() : Promise.reject(r.status); })
+			.then(function (data) {
+				// aufgeklappte "alle möglichen Werte" merken und wieder öffnen
+				var open = [];
+				devicesBox.querySelectorAll('details[open]').forEach(function (d) { open.push(d.getAttribute('data-key')); });
+				statusBox.innerHTML = data.status;
+				devicesBox.innerHTML = data.devices;
+				open.forEach(function (key) {
+					var d = devicesBox.querySelector('details[data-key="' + key + '"]');
+					if (d) d.open = true;
+				});
+				waiting = !!data.waiting;
+			})
+			.catch(function () { /* nächster Versuch beim nächsten Intervall */ })
+			.then(schedule);
+	}
+
+	document.addEventListener('visibilitychange', function () { if (!document.hidden) refresh(); });
+	schedule();
+})();
+</script>
+<?php else: ?>
+<form method="post" action="index.php?page=settings" data-ajax="false">
 	<input type="hidden" name="action" value="save">
 
 	<label><input type="checkbox" name="enabled" <?= !empty($mm_cfg['enabled']) ? 'checked' : '' ?>> <?= t('UI.ENABLED') ?></label>
@@ -340,44 +385,6 @@ LBWeb::lbheader(tr('UI.TITLE'), "", "");
 </form>
 
 <script>
-// Status und Gerätewerte automatisch aktualisieren (Formular bleibt unberührt):
-// alle 5 s, solange auf eine Statusmeldung gewartet wird, sonst alle 30 s; pausiert im Hintergrund-Tab
-(function () {
-	var statusBox = document.getElementById('mm-live-status');
-	var devicesBox = document.getElementById('mm-live-devices');
-	if (!statusBox || !devicesBox || !window.fetch) return;
-	var waiting = <?= live_waiting() ? 'true' : 'false' ?>;
-	var timer = null;
-
-	function schedule() {
-		clearTimeout(timer);
-		timer = setTimeout(refresh, waiting ? 5000 : 30000);
-	}
-
-	function refresh() {
-		if (document.hidden) { schedule(); return; }
-		fetch('index.php?ajax=live', { credentials: 'same-origin', cache: 'no-store' })
-			.then(function (r) { return r.ok ? r.json() : Promise.reject(r.status); })
-			.then(function (data) {
-				// aufgeklappte "alle möglichen Werte" merken und wieder öffnen
-				var open = [];
-				devicesBox.querySelectorAll('details[open]').forEach(function (d) { open.push(d.getAttribute('data-key')); });
-				statusBox.innerHTML = data.status;
-				devicesBox.innerHTML = data.devices;
-				open.forEach(function (key) {
-					var d = devicesBox.querySelector('details[data-key="' + key + '"]');
-					if (d) d.open = true;
-				});
-				waiting = !!data.waiting;
-			})
-			.catch(function () { /* nächster Versuch beim nächsten Intervall */ })
-			.then(schedule);
-	}
-
-	document.addEventListener('visibilitychange', function () { if (!document.hidden) refresh(); });
-	schedule();
-})();
-
 // Eigene Broker-Felder nur zeigen, wenn die LoxBerry-Zugangsdaten nicht verwendet werden
 (function () {
 	var cb = document.getElementById('mqtt_use_loxberry');
@@ -390,6 +397,7 @@ LBWeb::lbheader(tr('UI.TITLE'), "", "");
 	update();
 })();
 </script>
+<?php endif; ?>
 
 <?php
 LBWeb::lbfooter();
