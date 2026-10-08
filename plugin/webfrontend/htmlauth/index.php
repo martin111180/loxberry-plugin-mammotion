@@ -51,7 +51,7 @@ function mode_text($mm_code) {
 $mm_value_choices = ['online' => [1, 0], 'charging' => [1, 0], 'problem' => [1, 0]];
 
 // Bedeutung eines Werts als HTML: alle Möglichkeiten, der aktuelle Wert fett
-function value_meaning($mm_key, $mm_val) {
+function value_meaning($mm_key, $mm_val, $mm_dev_key = '') {
 	global $mm_value_choices, $mm_mode_codes;
 	if (isset($mm_value_choices[$mm_key])) {
 		$mm_parts = [];
@@ -67,7 +67,7 @@ function value_meaning($mm_key, $mm_val) {
 			$mm_item = h("$mm_code = " . mode_text($mm_code));
 			$mm_rows .= ((string)$mm_code === (string)$mm_val) ? "<b>$mm_item</b><br>" : "$mm_item<br>";
 		}
-		return '<b>' . h("$mm_val = " . mode_text((int)$mm_val)) . '</b><details><summary>' . t('UI.ALL_VALUES') . "</summary>$mm_rows</details>";
+		return '<b>' . h("$mm_val = " . mode_text((int)$mm_val)) . '</b><details data-key="' . h($mm_dev_key . '/' . $mm_key) . '"><summary>' . t('UI.ALL_VALUES') . "</summary>$mm_rows</details>";
 	}
 	$mm_text = t('VALUES.' . strtoupper($mm_key));
 	if (in_array($mm_key, ['error_time', 'last_report']) && (int)$mm_val > 0) {
@@ -155,6 +155,80 @@ $mm_status  = json_decode(@file_get_contents($mm_statusfile), true);
 $mm_topic   = $mm_cfg['topic'] ?? 'mammotion';
 $mm_mqtt    = $mm_cfg['mqtt'] ?? [];
 
+// ---------------------------------------------------------------- Live-Bereich
+// Status-Tabelle und Gerätetabellen: beim Seitenaufbau gerendert und per ?ajax=live nachgeladen
+
+function render_status_table() {
+	global $mm_running, $mm_status;
+?>
+<table class="mm-table">
+	<tr><td><?= t('UI.BRIDGE_SERVICE') ?></td><td><?= $mm_running ? '<span class="mm-ok">' . t('UI.RUNNING') . '</span>' : '<span class="mm-bad">' . t('UI.STOPPED') . '</span>' ?></td></tr>
+	<?php if ($mm_status): ?>
+	<tr><td><?= t('UI.CLOUD') ?></td><td><?= !empty($mm_status['connected']) ? '<span class="mm-ok">' . t('UI.CONNECTED') . '</span>' : '<span class="mm-bad">' . t('UI.NOT_CONNECTED') . '</span>' ?>
+		<?= !empty($mm_status['bridge_problem']) ? '<br>' . h($mm_status['bridge_problem']) : '' ?></td></tr>
+	<tr><td><?= t('UI.LAST_UPDATE') ?></td><td><?= h(date_fmt($mm_status['updated'] ?? 0)) ?></td></tr>
+	<?php endif; ?>
+</table>
+<?php
+}
+
+function render_devices() {
+	global $mm_status, $mm_topic;
+?>
+<?php if (!empty($mm_status['devices'])): foreach ($mm_status['devices'] as $mm_name => $mm_dev): $mm_v = $mm_dev['values'] ?? []; ?>
+<h3><?= h($mm_name) ?></h3>
+<?php $mm_wait = (int)($mm_dev['waiting_seconds'] ?? 0);
+if (!empty($mm_dev['waiting']) || $mm_wait > 0 || !$mm_v): ?>
+<div class="mm-msg mm-msg-wait"><?= t('UI.WAITING') ?><?= $mm_wait > 0 ? ' ' . t('UI.WAITING_SINCE', $mm_wait < 120 ? $mm_wait . ' s' : intdiv($mm_wait, 60) . ' min') : '' ?>.
+	<?= $mm_v ? t('UI.WAITING_OLD_VALUES') : t('UI.WAITING_NO_VALUES') ?></div>
+<?php endif; ?>
+<?php if ($mm_v): ?>
+<table class="mm-table">
+	<tr><th><?= t('UI.COL_VALUE') ?></th><th><?= t('UI.COL_CONTENT') ?></th><th><?= t('UI.COL_MEANING') ?></th><th><?= t('UI.COL_TOPIC') ?></th></tr>
+	<?php foreach ($mm_v as $mm_k => $mm_val):
+		$mm_t = "$mm_topic/{$mm_dev['key']}/$mm_k";
+		if (is_bool($mm_val)) $mm_val = $mm_val ? 1 : 0;
+		$mm_cls = ($mm_k === 'problem') ? ($mm_val ? 'mm-bad' : 'mm-ok') : '';
+	?>
+	<tr><td><?= h($mm_k) ?></td><td class="<?= $mm_cls ?>"><?= h($mm_val) ?></td><td class="mm-meaning"><?= value_meaning($mm_k, $mm_val, $mm_dev['key']) ?></td><td><code><?= h($mm_t) ?></code></td></tr>
+	<?php endforeach; ?>
+</table>
+<?php endif; ?>
+<?php endforeach; endif; ?>
+<?php
+}
+
+// Schneller nachladen, solange noch auf eine Statusmeldung gewartet wird
+function live_waiting() {
+	global $mm_status;
+	if (empty($mm_status['devices'])) {
+		return true;
+	}
+	foreach ($mm_status['devices'] as $mm_dev) {
+		if (!empty($mm_dev['waiting']) || empty($mm_dev['values'])) {
+			return true;
+		}
+	}
+	return false;
+}
+
+function capture($mm_fn) {
+	ob_start();
+	$mm_fn();
+	return ob_get_clean();
+}
+
+if (($_GET['ajax'] ?? '') === 'live') {
+	header('Content-Type: application/json; charset=utf-8');
+	header('Cache-Control: no-store');
+	echo json_encode([
+		'status'  => capture('render_status_table'),
+		'devices' => capture('render_devices'),
+		'waiting' => live_waiting(),
+	]);
+	exit;
+}
+
 // ---------------------------------------------------------------- Seite
 $navbar[1]['Name'] = tr('UI.NAV_SETTINGS');
 $navbar[1]['URL'] = 'index.php';
@@ -184,39 +258,13 @@ LBWeb::lbheader(tr('UI.TITLE'), "", "");
 <?php if ($mm_message): ?><div class="mm-msg <?= $mm_message_ok ? 'mm-msg-ok' : 'mm-msg-bad' ?>"><?= h($mm_message) ?></div><?php endif; ?>
 
 <h2><?= t('UI.STATUS') ?></h2>
-<table class="mm-table">
-	<tr><td><?= t('UI.BRIDGE_SERVICE') ?></td><td><?= $mm_running ? '<span class="mm-ok">' . t('UI.RUNNING') . '</span>' : '<span class="mm-bad">' . t('UI.STOPPED') . '</span>' ?></td></tr>
-	<?php if ($mm_status): ?>
-	<tr><td><?= t('UI.CLOUD') ?></td><td><?= !empty($mm_status['connected']) ? '<span class="mm-ok">' . t('UI.CONNECTED') . '</span>' : '<span class="mm-bad">' . t('UI.NOT_CONNECTED') . '</span>' ?>
-		<?= !empty($mm_status['bridge_problem']) ? '<br>' . h($mm_status['bridge_problem']) : '' ?></td></tr>
-	<tr><td><?= t('UI.LAST_UPDATE') ?></td><td><?= h(date_fmt($mm_status['updated'] ?? 0)) ?></td></tr>
-	<?php endif; ?>
-</table>
+<div id="mm-live-status"><?php render_status_table(); ?></div>
 <form method="post" data-ajax="false" style="display:inline">
 	<button type="submit" name="action" value="restart" data-inline="true" data-mini="true"><?= t('UI.BTN_RESTART') ?></button>
 	<button type="submit" name="action" value="stop" data-inline="true" data-mini="true"><?= t('UI.BTN_STOP') ?></button>
 </form>
 
-<?php if (!empty($mm_status['devices'])): foreach ($mm_status['devices'] as $mm_name => $mm_dev): $mm_v = $mm_dev['values'] ?? []; ?>
-<h3><?= h($mm_name) ?></h3>
-<?php $mm_wait = (int)($mm_dev['waiting_seconds'] ?? 0);
-if (!empty($mm_dev['waiting']) || $mm_wait > 0 || !$mm_v): ?>
-<div class="mm-msg mm-msg-wait"><?= t('UI.WAITING') ?><?= $mm_wait > 0 ? ' ' . t('UI.WAITING_SINCE', $mm_wait < 120 ? $mm_wait . ' s' : intdiv($mm_wait, 60) . ' min') : '' ?>.
-	<?= $mm_v ? t('UI.WAITING_OLD_VALUES') : t('UI.WAITING_NO_VALUES') ?></div>
-<?php endif; ?>
-<?php if ($mm_v): ?>
-<table class="mm-table">
-	<tr><th><?= t('UI.COL_VALUE') ?></th><th><?= t('UI.COL_CONTENT') ?></th><th><?= t('UI.COL_MEANING') ?></th><th><?= t('UI.COL_TOPIC') ?></th></tr>
-	<?php foreach ($mm_v as $mm_k => $mm_val):
-		$mm_t = "$mm_topic/{$mm_dev['key']}/$mm_k";
-		if (is_bool($mm_val)) $mm_val = $mm_val ? 1 : 0;
-		$mm_cls = ($mm_k === 'problem') ? ($mm_val ? 'mm-bad' : 'mm-ok') : '';
-	?>
-	<tr><td><?= h($mm_k) ?></td><td class="<?= $mm_cls ?>"><?= h($mm_val) ?></td><td class="mm-meaning"><?= value_meaning($mm_k, $mm_val) ?></td><td><code><?= h($mm_t) ?></code></td></tr>
-	<?php endforeach; ?>
-</table>
-<?php endif; ?>
-<?php endforeach; endif; ?>
+<div id="mm-live-devices"><?php render_devices(); ?></div>
 
 <p class="mm-hint">
 	<?= t('UI.HINT_SUMMARY', '<code>' . h($mm_topic) . '/problem</code>', '<code>' . h($mm_topic) . '/problem_text</code>') ?><br>
@@ -291,6 +339,44 @@ if (!empty($mm_dev['waiting']) || $mm_wait > 0 || !$mm_v): ?>
 </form>
 
 <script>
+// Status und Gerätewerte automatisch aktualisieren (Formular bleibt unberührt):
+// alle 5 s, solange auf eine Statusmeldung gewartet wird, sonst alle 30 s; pausiert im Hintergrund-Tab
+(function () {
+	var statusBox = document.getElementById('mm-live-status');
+	var devicesBox = document.getElementById('mm-live-devices');
+	if (!statusBox || !devicesBox || !window.fetch) return;
+	var waiting = <?= live_waiting() ? 'true' : 'false' ?>;
+	var timer = null;
+
+	function schedule() {
+		clearTimeout(timer);
+		timer = setTimeout(refresh, waiting ? 5000 : 30000);
+	}
+
+	function refresh() {
+		if (document.hidden) { schedule(); return; }
+		fetch('index.php?ajax=live', { credentials: 'same-origin', cache: 'no-store' })
+			.then(function (r) { return r.ok ? r.json() : Promise.reject(r.status); })
+			.then(function (data) {
+				// aufgeklappte "alle möglichen Werte" merken und wieder öffnen
+				var open = [];
+				devicesBox.querySelectorAll('details[open]').forEach(function (d) { open.push(d.getAttribute('data-key')); });
+				statusBox.innerHTML = data.status;
+				devicesBox.innerHTML = data.devices;
+				open.forEach(function (key) {
+					var d = devicesBox.querySelector('details[data-key="' + key + '"]');
+					if (d) d.open = true;
+				});
+				waiting = !!data.waiting;
+			})
+			.catch(function () { /* nächster Versuch beim nächsten Intervall */ })
+			.then(schedule);
+	}
+
+	document.addEventListener('visibilitychange', function () { if (!document.hidden) refresh(); });
+	schedule();
+})();
+
 // Eigene Broker-Felder nur zeigen, wenn die LoxBerry-Zugangsdaten nicht verwendet werden
 (function () {
 	var cb = document.getElementById('mqtt_use_loxberry');
