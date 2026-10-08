@@ -551,7 +551,8 @@ class Bridge:
         if not handle.last_report_data_at:
             self.evaluate_waiting(state, now)
             return
-        if state.waiting_since is not None:
+        first_report = state.waiting_since is not None
+        if first_report:
             log.info("%s: erste Statusmeldung nach %d s erhalten", name, now - state.waiting_since)
             state.waiting_since = None
 
@@ -618,10 +619,17 @@ class Bridge:
                 log.warning("%s: PROBLEM – %s", name, values["problem_text"])
             elif state.last_values:
                 log.info("%s: Problem behoben", name)
+        # Weboberfläche sofort aktualisieren, wenn sich ein angezeigter Wert ändert –
+        # last_report allein nicht (ändert sich bei jeder Meldung; dafür reicht der 30-s-Takt)
+        changed = {k: v for k, v in values.items() if k != "last_report"} != {
+            k: v for k, v in state.last_values.items() if k != "last_report"
+        }
         state.last_values = values
         for key, value in values.items():
             self.mqtt.publish(f"{state.key}/{key}", value)
         self.publish_summary()
+        if changed or first_report:
+            self.write_status()
 
     def evaluate_waiting(self, state: MowerState, now: float) -> None:
         """Noch keine Statusmeldung: nur melden, wenn das zu lange dauert."""
