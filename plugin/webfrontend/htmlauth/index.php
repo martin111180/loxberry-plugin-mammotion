@@ -20,6 +20,63 @@ function service($mm_cmd) {
 	return trim((string)shell_exec(escapeshellarg($mm_service) . " " . escapeshellarg($mm_cmd) . " </dev/null 2>&1"));
 }
 
+// Alle Gerätestatus (WorkMode) mit deutschem Text – wie MODE_TEXT_DE in mammotion_bridge.py
+$mm_mode_texts = [
+	0 => 'Inaktiv', 1 => 'Online', 2 => 'Offline', 3 => 'Ausgeschaltet', 8 => 'Deaktiviert',
+	10 => 'Initialisierung', 11 => 'Bereit', 12 => 'Nicht verbunden', 13 => 'Mäht', 14 => 'Fährt zur Station',
+	15 => 'Lädt', 16 => 'Update läuft', 17 => 'Gesperrt', 18 => 'Systemfehler', 19 => 'Pausiert',
+	20 => 'Manuelles Mähen', 22 => 'Update erfolgreich', 23 => 'Update fehlgeschlagen', 31 => 'Karte zeichnen',
+	32 => 'Hindernis zeichnen', 34 => 'Kanal zeichnen', 36 => 'Grenze bearbeiten', 37 => 'Positionsfehler',
+	38 => 'Grenzüberschreitung', 39 => 'Ladepause', 45 => 'Automatische Kartierung', 46 => 'Kartierung pausiert',
+	47 => 'Kartierung: Rückkehr', 48 => 'Schlafmodus', 50 => 'Rückkehr zum Laden', 51 => 'Setzt zurück',
+	52 => 'Wiederherstellung',
+];
+
+// Mögliche Werte bzw. Beschreibung je Topic für die Spalte "Bedeutung"
+$mm_value_choices = [
+	'online'   => [1 => 'mit der Cloud verbunden', 0 => 'offline'],
+	'charging' => [1 => 'an der Ladestation (lädt bzw. hält die Ladung)', 0 => 'nicht an der Ladestation'],
+	'problem'  => [1 => 'Problem – siehe problem_text', 0 => 'alles in Ordnung'],
+];
+$mm_value_desc = [
+	'battery'        => 'Akkustand in Prozent (0–100)',
+	'mode_text'      => 'Gerätestatus als Text',
+	'progress'       => 'Fortschritt der aktuellen Mäh-Aufgabe in Prozent',
+	'problem_text'   => 'Beschreibung des Problems, sonst „OK“',
+	'error_code'     => '0 = kein Fehler, sonst der zuletzt gemeldete neue Mammotion-Fehlercode',
+	'error_text'     => 'Beschreibung zum Fehlercode (leer, wenn kein Fehler)',
+	'error_solution' => 'Lösungsvorschlag von Mammotion (oft leer)',
+	'error_time'     => 'Zeitpunkt des Fehlers als Unix-Zeit, 0 = kein Fehler',
+	'last_report'    => 'Zeitpunkt der letzten Statusmeldung als Unix-Zeit',
+];
+
+// Bedeutung eines Werts als HTML: alle Möglichkeiten, der aktuelle Wert fett
+function value_meaning($mm_key, $mm_val) {
+	global $mm_value_choices, $mm_value_desc, $mm_mode_texts;
+	if (isset($mm_value_choices[$mm_key])) {
+		$mm_parts = [];
+		foreach ($mm_value_choices[$mm_key] as $mm_code => $mm_text) {
+			$mm_item = h("$mm_code = $mm_text");
+			$mm_parts[] = ((string)$mm_code === (string)$mm_val) ? "<b>$mm_item</b>" : $mm_item;
+		}
+		return implode('<br>', $mm_parts);
+	}
+	if ($mm_key === 'mode') {
+		$mm_current = isset($mm_mode_texts[(int)$mm_val]) ? h("$mm_val = " . $mm_mode_texts[(int)$mm_val]) : h("$mm_val = unbekannter Status");
+		$mm_rows = '';
+		foreach ($mm_mode_texts as $mm_code => $mm_text) {
+			$mm_item = h("$mm_code = $mm_text");
+			$mm_rows .= ((string)$mm_code === (string)$mm_val) ? "<b>$mm_item</b><br>" : "$mm_item<br>";
+		}
+		return "<b>$mm_current</b><details><summary>alle möglichen Werte</summary>$mm_rows</details>";
+	}
+	$mm_text = h($mm_value_desc[$mm_key] ?? '');
+	if (in_array($mm_key, ['error_time', 'last_report']) && (int)$mm_val > 0) {
+		$mm_text .= '<br><b>' . h(date('d.m.Y H:i:s', (int)$mm_val)) . '</b>';
+	}
+	return $mm_text;
+}
+
 // Gerätestatus (WorkMode), die als Problem markiert werden können – Texte wie in mammotion_bridge.py
 $mm_problem_modes = [
 	17 => 'Gesperrt',
@@ -120,6 +177,9 @@ LBWeb::lbheader("Mammotion Mähroboter", "", "");
 	.mm-table td, .mm-table th { border-bottom: 1px solid #ddd; padding: 4px 8px; text-align: left; vertical-align: top; }
 	.mm-table code { font-size: 90%; }
 	.mm-hint { font-size: 90%; color: #666; }
+	.mm-meaning { font-size: 90%; color: #555; }
+	.mm-meaning b { color: #222; }
+	.mm-meaning summary { cursor: pointer; color: #6b9e1f; margin-top: 2px; }
 	.mm-msg { padding: 8px 12px; margin-bottom: 1em; border-radius: 4px; }
 	.mm-msg-ok { background: #e8f5e9; border: 1px solid #a5d6a7; color: #1b5e20; }
 	.mm-msg-bad { background: #fdecea; border: 1px solid #f5c6cb; color: #8a1c1c; }
@@ -144,13 +204,13 @@ LBWeb::lbheader("Mammotion Mähroboter", "", "");
 <?php if (!empty($mm_status['devices'])): foreach ($mm_status['devices'] as $mm_name => $mm_dev): $mm_v = $mm_dev['values'] ?? []; ?>
 <h3><?= h($mm_name) ?></h3>
 <table class="mm-table">
-	<tr><th>Wert</th><th>Inhalt</th><th>MQTT-Topic</th></tr>
+	<tr><th>Wert</th><th>Inhalt</th><th>Bedeutung</th><th>MQTT-Topic</th></tr>
 	<?php foreach ($mm_v as $mm_k => $mm_val):
 		$mm_t = "$mm_topic/{$mm_dev['key']}/$mm_k";
 		if (is_bool($mm_val)) $mm_val = $mm_val ? 1 : 0;
 		$mm_cls = ($mm_k === 'problem') ? ($mm_val ? 'mm-bad' : 'mm-ok') : '';
 	?>
-	<tr><td><?= h($mm_k) ?></td><td class="<?= $mm_cls ?>"><?= h($mm_val) ?></td><td><code><?= h($mm_t) ?></code></td></tr>
+	<tr><td><?= h($mm_k) ?></td><td class="<?= $mm_cls ?>"><?= h($mm_val) ?></td><td class="mm-meaning"><?= value_meaning($mm_k, $mm_val) ?></td><td><code><?= h($mm_t) ?></code></td></tr>
 	<?php endforeach; ?>
 </table>
 <?php endforeach; endif; ?>
