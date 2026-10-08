@@ -183,6 +183,7 @@ LBWeb::lbheader("Mammotion Mähroboter", "", "");
 	.mm-msg { padding: 8px 12px; margin-bottom: 1em; border-radius: 4px; }
 	.mm-msg-ok { background: #e8f5e9; border: 1px solid #a5d6a7; color: #1b5e20; }
 	.mm-msg-bad { background: #fdecea; border: 1px solid #f5c6cb; color: #8a1c1c; }
+	.mm-msg-wait { background: #fff8e1; border: 1px solid #ffe082; color: #5d4300; }
 </style>
 
 <?php if ($mm_message): ?><div class="mm-msg <?= $mm_message_ok ? 'mm-msg-ok' : 'mm-msg-bad' ?>"><?= h($mm_message) ?></div><?php endif; ?>
@@ -203,6 +204,11 @@ LBWeb::lbheader("Mammotion Mähroboter", "", "");
 
 <?php if (!empty($mm_status['devices'])): foreach ($mm_status['devices'] as $mm_name => $mm_dev): $mm_v = $mm_dev['values'] ?? []; ?>
 <h3><?= h($mm_name) ?></h3>
+<?php $mm_wait = (int)($mm_dev['waiting_seconds'] ?? 0); if ($mm_wait > 0): ?>
+<div class="mm-msg mm-msg-wait">Warte auf die erste Statusmeldung des Mähers (seit <?= $mm_wait < 120 ? $mm_wait . ' s' : intdiv($mm_wait, 60) . ' min' ?>).
+	<?= $mm_v ? 'Angezeigt werden die zuletzt bekannten Werte.' : 'Werte erscheinen, sobald der Mäher sich meldet.' ?></div>
+<?php endif; ?>
+<?php if ($mm_v): ?>
 <table class="mm-table">
 	<tr><th>Wert</th><th>Inhalt</th><th>Bedeutung</th><th>MQTT-Topic</th></tr>
 	<?php foreach ($mm_v as $mm_k => $mm_val):
@@ -213,6 +219,7 @@ LBWeb::lbheader("Mammotion Mähroboter", "", "");
 	<tr><td><?= h($mm_k) ?></td><td class="<?= $mm_cls ?>"><?= h($mm_val) ?></td><td class="mm-meaning"><?= value_meaning($mm_k, $mm_val) ?></td><td><code><?= h($mm_t) ?></code></td></tr>
 	<?php endforeach; ?>
 </table>
+<?php endif; ?>
 <?php endforeach; endif; ?>
 
 <p class="mm-hint">

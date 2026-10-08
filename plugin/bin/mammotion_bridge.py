@@ -285,6 +285,8 @@ class MowerState:
         self.error_time = 0
         self.error_source = ""
         self.offline_since: float | None = None
+        # Seit wann auf die erste Statusmeldung gewartet wird (None = Meldung liegt vor)
+        self.waiting_since: float | None = None
         self.last_values: dict[str, Any] = {}
         self.subscriptions: list[Any] = []
 
@@ -484,6 +486,16 @@ class Bridge:
         snap = handle.snapshot
         raw = snap.raw
         now = time.time()
+
+        # Ohne echte Statusmeldung enthält das Gerätemodell nur Startwerte (Akku 0, Status 0 …).
+        # Diese nicht veröffentlichen – die zuletzt gesendeten (retained) Werte bleiben stehen.
+        if not handle.last_report_data_at:
+            self.evaluate_waiting(state, now)
+            return
+        if state.waiting_since is not None:
+            log.info("%s: erste Statusmeldung nach %d s erhalten", name, now - state.waiting_since)
+            state.waiting_since = None
+
         dev = raw.report_data.dev
         mode = int(dev.sys_status or 0)
         online = bool(snap.online)
@@ -552,6 +564,22 @@ class Bridge:
             self.mqtt.publish(f"{state.key}/{key}", value)
         self.publish_summary()
 
+    def evaluate_waiting(self, state: MowerState, now: float) -> None:
+        """Noch keine Statusmeldung: nur melden, wenn das zu lange dauert."""
+        if state.waiting_since is None:
+            state.waiting_since = now
+            log.info("%s: warte auf die erste Statusmeldung des Mähers", state.name)
+        waited = now - state.waiting_since
+        limit = int(self.cfg.get("offline_problem_minutes") or 0) * 60
+        if limit and waited >= limit:
+            text = f"Keine Statusmeldung vom Mäher seit {int(waited // 60)} min"
+            if state.last_values.get("problem_text") != text:
+                log.warning("%s: PROBLEM – %s", state.name, text)
+            state.last_values = {**state.last_values, "problem": True, "problem_text": text}
+            self.mqtt.publish(f"{state.key}/problem", True)
+            self.mqtt.publish(f"{state.key}/problem_text", text)
+        self.publish_summary()
+
     def mode_text(self, mode: int) -> str:
         if self.lang == "de" and mode in MODE_TEXT_DE:
             return MODE_TEXT_DE[mode]
@@ -601,7 +629,12 @@ class Bridge:
             "connected": self.connected,
             "bridge_problem": self.bridge_problem,
             "devices": {
-                s.name: {"key": s.key, "values": s.last_values} for s in self.mowers.values()
+                s.name: {
+                    "key": s.key,
+                    "values": s.last_values,
+                    "waiting_seconds": int(time.time() - s.waiting_since) if s.waiting_since else 0,
+                }
+                for s in self.mowers.values()
             },
         }
         tmp = self.status_file + ".tmp"
