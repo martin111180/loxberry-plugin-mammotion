@@ -20,10 +20,15 @@ schickt die Werte an den Loxone Miniserver.
 
 ## Installation
 
-1. Neueste Version unter [Releases](https://github.com/martin111180/loxberry-plugin-mammotion/releases/latest)
-   herunterladen (`loxberry-plugin-mammotion-<version>.zip`).
-2. LoxBerry → *Plugin-Verwaltung* → ZIP hochladen und installieren (dauert einige Minuten).
-   Alternativ den Download-Link des ZIPs direkt als URL in der Plugin-Verwaltung eintragen.
+1. LoxBerry → *Plugin-Verwaltung* → diese URL eintragen und installieren (dauert einige Minuten):
+
+   ```
+   https://github.com/martin111180/loxberry-plugin-mammotion/releases/latest/download/loxberry-plugin-mammotion.zip
+   ```
+
+   Der Link zeigt immer auf die neueste freigegebene Version.
+2. Alternativ das ZIP unter [Releases](https://github.com/martin111180/loxberry-plugin-mammotion/releases/latest)
+   herunterladen und in der Plugin-Verwaltung hochladen.
 3. Plugin *Mammotion Mähroboter* öffnen, Konto + Passwort eintragen, **Speichern**.
 4. Im Statusbereich erscheinen nach kurzer Zeit die Mäher mit allen Werten, Topics und Loxone-Eingangsnamen.
 
@@ -104,6 +109,7 @@ Wie ein Release erstellt wird, steht in [docs/entwicklung.md](docs/entwicklung.m
 | `plugin/preupgrade.sh` / `postupgrade.sh` | sichern/wiederherstellen der Konfiguration bei Updates |
 | `tools/build_zip.py` | baut das installierbare ZIP nach `dist/` |
 | `release.cfg` | Versionsinfo für das LoxBerry-Auto-Update (pflegt der Release-Workflow) |
+| `tools/make_icons.py` | erzeugt die Plugin-Icons in `plugin/icons/` |
 | `.github/workflows/release.yml` | prüft jeden Push, baut bei Tag `v*` das Release |
 
 

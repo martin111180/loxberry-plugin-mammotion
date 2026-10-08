@@ -24,6 +24,12 @@ Alle Textdateien brauchen LF-Zeilenenden (`.gitattributes` erzwingt das; `build_
 4. Der Workflow prüft, dass Tag und `VERSION` übereinstimmen, baut das ZIP, legt das Release an und
    setzt `release.cfg` auf `main` auf die neue Version. Ab dann bieten LoxBerrys das Update an.
 
+Jedes Release enthält das ZIP zweimal: mit Versionsnummer (für `release.cfg`) und als
+`loxberry-plugin-mammotion.zip` für den festen Link
+`https://github.com/martin111180/loxberry-plugin-mammotion/releases/latest/download/loxberry-plugin-mammotion.zip`.
+Der Job `fester-link` hängt diese Datei bei jedem Push auf `main` nachträglich an, falls sie am neuesten
+Release fehlt.
+
 ## Lokal testen
 
 ```bash

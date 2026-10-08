@@ -70,7 +70,10 @@ jobs:
           echo "version=$TAG" >> "$GITHUB_OUTPUT"
 
       - name: Plugin-ZIP bauen
-        run: python tools/build_zip.py
+        run: |
+          python tools/build_zip.py
+          # Kopie ohne Versionsnummer für den festen Link .../releases/latest/download/loxberry-plugin-mammotion.zip
+          cp "dist/loxberry-plugin-mammotion-${{ steps.ver.outputs.version }}.zip" dist/loxberry-plugin-mammotion.zip
 
       - name: GitHub-Release anlegen
         env:
@@ -102,3 +105,24 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git commit -am "release.cfg auf Version $V gesetzt"
           git push origin main
+
+  # Sorgt dafür, dass das neueste Release die Datei ohne Versionsnummer hat
+  # (nachträglich für Releases, die vor Einführung des festen Links erstellt wurden).
+  fester-link:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - name: loxberry-plugin-mammotion.zip am neuesten Release prüfen
+        run: |
+          TAG=$(gh release view --json tagName -q .tagName) || { echo "Noch kein Release"; exit 0; }
+          if gh release view "$TAG" --json assets -q '.assets[].name' | grep -qx loxberry-plugin-mammotion.zip; then
+            echo "$TAG hat den festen Download bereits"
+            exit 0
+          fi
+          gh release download "$TAG" -p "loxberry-plugin-mammotion-${TAG#v}.zip" -D dl
+          cp "dl/loxberry-plugin-mammotion-${TAG#v}.zip" loxberry-plugin-mammotion.zip
+          gh release upload "$TAG" loxberry-plugin-mammotion.zip
+          echo "Fester Download an $TAG angehängt"
