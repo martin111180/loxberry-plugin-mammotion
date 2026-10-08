@@ -20,8 +20,41 @@ function service($mm_cmd) {
 	return trim((string)shell_exec(escapeshellarg($mm_service) . " " . escapeshellarg($mm_cmd) . " </dev/null 2>&1"));
 }
 
+// Gerätestatus (WorkMode), die als Problem markiert werden können – Texte wie in mammotion_bridge.py
+$mm_problem_modes = [
+	17 => 'Gesperrt',
+	18 => 'Systemfehler',
+	37 => 'Positionsfehler',
+	38 => 'Grenzüberschreitung',
+	23 => 'Update fehlgeschlagen',
+	19 => 'Pausiert',
+	39 => 'Ladepause',
+	12 => 'Nicht verbunden',
+	3  => 'Ausgeschaltet',
+];
+
+function is_running() {
+	return strpos(service('status'), 'running') === 0;
+}
+
+// Ausgabe von service.sh in eine verständliche Meldung übersetzen
+function action_message($mm_action, $mm_output) {
+	$mm_lines = array_values(array_filter(array_map('trim', explode("\n", $mm_output))));
+	$mm_reason = $mm_lines ? end($mm_lines) : '';
+	$mm_up = is_running();
+	if ($mm_action === 'stop') {
+		return [!$mm_up, $mm_up ? "Die Bridge konnte nicht gestoppt werden. $mm_reason" : "Die Bridge wurde gestoppt."];
+	}
+	$mm_prefix = $mm_action === 'save' ? "Einstellungen gespeichert. " : "";
+	if ($mm_up) {
+		return [true, $mm_prefix . ($mm_action === 'start' ? "Die Bridge wurde gestartet." : "Die Bridge wurde neu gestartet.")];
+	}
+	return [false, $mm_prefix . "Die Bridge läuft nicht: $mm_reason"];
+}
+
 $mm_cfg = read_config($mm_cfgfile);
 $mm_message = "";
+$mm_message_ok = true;
 
 // ---------------------------------------------------------------- Aktionen
 if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
@@ -35,8 +68,8 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
 		$mm_cfg['language'] = preg_replace('/[^a-z]/', '', $_POST['language'] ?? 'de') ?: 'de';
 		$mm_topic = trim(preg_replace('#[^A-Za-z0-9_/\-]#', '', $_POST['topic'] ?? 'mammotion'), '/');
 		$mm_cfg['topic'] = $mm_topic !== '' ? $mm_topic : 'mammotion';
-		$mm_modes = array_filter(array_map('trim', explode(',', $_POST['problem_modes'] ?? '')), 'is_numeric');
-		$mm_cfg['problem_modes'] = array_values(array_map('intval', $mm_modes));
+		$mm_modes = array_filter((array)($_POST['problem_modes'] ?? []), 'is_numeric');
+		$mm_cfg['problem_modes'] = array_values(array_unique(array_map('intval', $mm_modes)));
 		foreach (['error_hold_minutes', 'offline_problem_minutes', 'refresh_seconds', 'republish_seconds'] as $mm_k) {
 			$mm_cfg[$mm_k] = max(0, intval($_POST[$mm_k] ?? 0));
 		}
@@ -55,13 +88,17 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
 		@chmod($mm_cfgfile, 0600);
 		// Abonnement für das LoxBerry MQTT Gateway
 		file_put_contents($mm_subsfile, $mm_cfg['topic'] . "/#\n");
-		$mm_message = $mm_ok ? "Gespeichert. " . h(service('restart')) : "Fehler: Konfiguration konnte nicht gespeichert werden!";
+		if ($mm_ok) {
+			[$mm_message_ok, $mm_message] = action_message('save', service('restart'));
+		} else {
+			[$mm_message_ok, $mm_message] = [false, "Fehler: Die Einstellungen konnten nicht gespeichert werden!"];
+		}
 	} elseif (in_array($mm_action, ['start', 'stop', 'restart'])) {
-		$mm_message = h(service($mm_action));
+		[$mm_message_ok, $mm_message] = action_message($mm_action, service($mm_action));
 	}
 }
 
-$mm_running = strpos(service('status'), 'running') === 0;
+$mm_running = is_running();
 $mm_status  = json_decode(@file_get_contents($mm_statusfile), true);
 $mm_topic   = $mm_cfg['topic'] ?? 'mammotion';
 $mm_mqtt    = $mm_cfg['mqtt'] ?? [];
@@ -83,11 +120,13 @@ LBWeb::lbheader("Mammotion Mähroboter", "", "");
 	.mm-table td, .mm-table th { border-bottom: 1px solid #ddd; padding: 4px 8px; text-align: left; vertical-align: top; }
 	.mm-table code { font-size: 90%; }
 	.mm-hint { font-size: 90%; color: #666; }
-	.mm-msg { padding: 8px; background: #fff8e1; border: 1px solid #ffe082; margin-bottom: 1em; }
+	.mm-msg { padding: 8px 12px; margin-bottom: 1em; border-radius: 4px; }
+	.mm-msg-ok { background: #e8f5e9; border: 1px solid #a5d6a7; color: #1b5e20; }
+	.mm-msg-bad { background: #fdecea; border: 1px solid #f5c6cb; color: #8a1c1c; }
 	.mm-log { max-height: 300px; overflow: auto; background: #222; color: #ddd; padding: 8px; font-size: 80%; white-space: pre-wrap; }
 </style>
 
-<?php if ($mm_message): ?><div class="mm-msg"><?= $mm_message ?></div><?php endif; ?>
+<?php if ($mm_message): ?><div class="mm-msg <?= $mm_message_ok ? 'mm-msg-ok' : 'mm-msg-bad' ?>"><?= h($mm_message) ?></div><?php endif; ?>
 
 <h2>Status</h2>
 <table class="mm-table">
@@ -137,9 +176,17 @@ LBWeb::lbheader("Mammotion Mähroboter", "", "");
 		So wird dein Haupt-Login in der App nicht durch die Bridge abgemeldet.</p>
 
 	<h3>Problemerkennung</h3>
-	<label for="problem_modes">Gerätestatus, die als Problem gelten (Komma-getrennt)</label>
-	<input type="text" id="problem_modes" name="problem_modes" value="<?= h(implode(',', $mm_cfg['problem_modes'] ?? [])) ?>">
-	<p class="mm-hint">17 = gesperrt, 18 = Systemfehler, 19 = pausiert, 23 = Update fehlgeschlagen, 37 = Positionsfehler, 38 = Grenzüberschreitung</p>
+	<fieldset data-role="controlgroup">
+		<legend>Diese Gerätestatus als Problem melden:</legend>
+		<?php $mm_selected = array_map('intval', $mm_cfg['problem_modes'] ?? []);
+		foreach ($mm_problem_modes as $mm_code => $mm_label): ?>
+		<label><input type="checkbox" name="problem_modes[]" value="<?= $mm_code ?>" <?= in_array($mm_code, $mm_selected, true) ? 'checked' : '' ?>> <?= h($mm_label) ?></label>
+		<?php endforeach;
+		// Von Hand eingetragene Codes, die hier nicht aufgelistet sind, beibehalten
+		foreach (array_diff($mm_selected, array_keys($mm_problem_modes)) as $mm_code): ?>
+		<input type="hidden" name="problem_modes[]" value="<?= (int)$mm_code ?>">
+		<?php endforeach; ?>
+	</fieldset>
 	<label for="error_hold_minutes">Gemeldeten Fehler so lange als Problem halten (Minuten, 0 = bis Quittierung)</label>
 	<input type="number" id="error_hold_minutes" name="error_hold_minutes" min="0" value="<?= h($mm_cfg['error_hold_minutes'] ?? 60) ?>">
 	<label for="offline_problem_minutes">Offline länger als … Minuten = Problem (0 = aus)</label>
@@ -158,8 +205,9 @@ LBWeb::lbheader("Mammotion Mähroboter", "", "");
 	<input type="text" id="topic" name="topic" value="<?= h($mm_topic) ?>">
 	<label for="republish_seconds">Alle Werte erneut senden alle … Sekunden</label>
 	<input type="number" id="republish_seconds" name="republish_seconds" min="30" value="<?= h($mm_cfg['republish_seconds'] ?? 300) ?>">
-	<label><input type="checkbox" name="mqtt_use_loxberry" <?= !isset($mm_mqtt['use_loxberry']) || $mm_mqtt['use_loxberry'] ? 'checked' : '' ?>> Broker-Zugangsdaten des LoxBerry verwenden (empfohlen)</label>
-	<p class="mm-hint">Nur ohne diese Option werden die folgenden Felder verwendet:</p>
+	<?php $mm_use_lb = !isset($mm_mqtt['use_loxberry']) || $mm_mqtt['use_loxberry']; ?>
+	<label><input type="checkbox" id="mqtt_use_loxberry" name="mqtt_use_loxberry" <?= $mm_use_lb ? 'checked' : '' ?>> Broker-Zugangsdaten des LoxBerry verwenden (empfohlen)</label>
+	<div id="mm-mqtt-manual"<?= $mm_use_lb ? ' style="display:none"' : '' ?>>
 	<label for="mqtt_host">Broker-Host</label>
 	<input type="text" id="mqtt_host" name="mqtt_host" value="<?= h($mm_mqtt['host'] ?? 'localhost') ?>">
 	<label for="mqtt_port">Port</label>
@@ -168,6 +216,7 @@ LBWeb::lbheader("Mammotion Mähroboter", "", "");
 	<input type="text" id="mqtt_user" name="mqtt_user" value="<?= h($mm_mqtt['user'] ?? '') ?>" autocomplete="off">
 	<label for="mqtt_password">Passwort <?= !empty($mm_mqtt['password']) ? '(gespeichert)' : '' ?></label>
 	<input type="password" id="mqtt_password" name="mqtt_password" value="" autocomplete="new-password">
+	</div>
 
 	<h3>Protokoll</h3>
 	<select id="loglevel" name="loglevel">
@@ -184,6 +233,20 @@ LBWeb::lbheader("Mammotion Mähroboter", "", "");
 	$mm_lines = @file($mm_logfile);
 	echo $mm_lines ? h(implode('', array_slice($mm_lines, -60))) : 'Noch kein Log vorhanden.';
 ?></div>
+
+<script>
+// Eigene Broker-Felder nur zeigen, wenn die LoxBerry-Zugangsdaten nicht verwendet werden
+(function () {
+	var cb = document.getElementById('mqtt_use_loxberry');
+	var box = document.getElementById('mm-mqtt-manual');
+	if (!cb || !box) return;
+	function update() { box.style.display = cb.checked ? 'none' : ''; }
+	cb.addEventListener('change', update);
+	cb.addEventListener('click', function () { setTimeout(update, 0); });
+	if (window.jQuery) { window.jQuery(cb).on('change', update); }  // jQuery Mobile löst change über jQuery aus
+	update();
+})();
+</script>
 
 <?php
 LBWeb::lbfooter();

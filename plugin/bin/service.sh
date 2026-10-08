@@ -47,7 +47,7 @@ start() {
 		return 0
 	fi
 	if ! has_account; then
-		echo "Noch kein Mammotion-Konto eingetragen – Bridge startet nach dem Speichern der Zugangsdaten"
+		echo "Es sind noch keine Mammotion-Zugangsdaten (E-Mail und Passwort) eingetragen."
 		return 0
 	fi
 	cd "$DATA" || return 1

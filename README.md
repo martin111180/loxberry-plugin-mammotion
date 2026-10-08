@@ -64,8 +64,8 @@ Alle Werte werden *retained* gesendet.
 
 ## Wann gilt etwas als „Problem“?
 
-* Gerätestatus ist in der Liste *Problem-Status* (Standard: 17 gesperrt, 18 Systemfehler,
-  23 Update fehlgeschlagen, 37 Positionsfehler, 38 Grenzüberschreitung; 19 *Pause* kann ergänzt werden)
+* der Mäher ist in einem Status, der in den Einstellungen angehakt ist (Standard: Gesperrt, Systemfehler,
+  Positionsfehler, Grenzüberschreitung, Update fehlgeschlagen; zusätzlich wählbar u. a. Pausiert, Ladepause)
 * der Mäher meldet einen **neuen** Fehlercode (Warn-Ereignis oder neuer Eintrag in der Fehlerliste) –
   bleibt für die eingestellte Haltezeit aktiv, bis er quittiert wird oder der Mäher wieder mäht
 * der Mäher ist länger als X Minuten offline (einstellbar, 0 = aus)
