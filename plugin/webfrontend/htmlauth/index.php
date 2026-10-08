@@ -204,9 +204,10 @@ LBWeb::lbheader("Mammotion Mähroboter", "", "");
 
 <?php if (!empty($mm_status['devices'])): foreach ($mm_status['devices'] as $mm_name => $mm_dev): $mm_v = $mm_dev['values'] ?? []; ?>
 <h3><?= h($mm_name) ?></h3>
-<?php $mm_wait = (int)($mm_dev['waiting_seconds'] ?? 0); if ($mm_wait > 0): ?>
-<div class="mm-msg mm-msg-wait">Warte auf die erste Statusmeldung des Mähers (seit <?= $mm_wait < 120 ? $mm_wait . ' s' : intdiv($mm_wait, 60) . ' min' ?>).
-	<?= $mm_v ? 'Angezeigt werden die zuletzt bekannten Werte.' : 'Werte erscheinen, sobald der Mäher sich meldet.' ?></div>
+<?php $mm_wait = (int)($mm_dev['waiting_seconds'] ?? 0);
+if (!empty($mm_dev['waiting']) || $mm_wait > 0 || !$mm_v): ?>
+<div class="mm-msg mm-msg-wait">Warte auf die erste Statusmeldung des Mähers<?= $mm_wait > 0 ? ' (seit ' . ($mm_wait < 120 ? $mm_wait . ' s' : intdiv($mm_wait, 60) . ' min') . ')' : '' ?>.
+	<?= $mm_v ? 'Angezeigt werden die zuletzt bekannten Werte.' : 'Die Werte erscheinen, sobald sich der Mäher meldet – Seite dann neu laden.' ?></div>
 <?php endif; ?>
 <?php if ($mm_v): ?>
 <table class="mm-table">

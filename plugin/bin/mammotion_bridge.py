@@ -632,7 +632,8 @@ class Bridge:
                 s.name: {
                     "key": s.key,
                     "values": s.last_values,
-                    "waiting_seconds": int(time.time() - s.waiting_since) if s.waiting_since else 0,
+                    "waiting": s.waiting_since is not None,
+                    "waiting_seconds": int(time.time() - s.waiting_since) if s.waiting_since is not None else 0,
                 }
                 for s in self.mowers.values()
             },
