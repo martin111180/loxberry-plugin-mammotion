@@ -123,7 +123,6 @@ LBWeb::lbheader("Mammotion Mähroboter", "", "");
 	.mm-msg { padding: 8px 12px; margin-bottom: 1em; border-radius: 4px; }
 	.mm-msg-ok { background: #e8f5e9; border: 1px solid #a5d6a7; color: #1b5e20; }
 	.mm-msg-bad { background: #fdecea; border: 1px solid #f5c6cb; color: #8a1c1c; }
-	.mm-log { max-height: 300px; overflow: auto; background: #222; color: #ddd; padding: 8px; font-size: 80%; white-space: pre-wrap; }
 </style>
 
 <?php if ($mm_message): ?><div class="mm-msg <?= $mm_message_ok ? 'mm-msg-ok' : 'mm-msg-bad' ?>"><?= h($mm_message) ?></div><?php endif; ?>
@@ -227,12 +226,6 @@ LBWeb::lbheader("Mammotion Mähroboter", "", "");
 
 	<button type="submit" data-icon="check">Speichern und Bridge neu starten</button>
 </form>
-
-<h2>Letzte Logeinträge</h2>
-<div class="mm-log"><?php
-	$mm_lines = @file($mm_logfile);
-	echo $mm_lines ? h(implode('', array_slice($mm_lines, -60))) : 'Noch kein Log vorhanden.';
-?></div>
 
 <script>
 // Eigene Broker-Felder nur zeigen, wenn die LoxBerry-Zugangsdaten nicht verwendet werden

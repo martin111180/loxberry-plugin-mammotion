@@ -121,6 +121,14 @@ RECOVERED_MODES = {13, 20}
 log = logging.getLogger("mammotion_bridge")
 
 
+class ConfigError(Exception):
+    """Fehlende/ungültige Einstellungen – wird ohne Traceback protokolliert."""
+
+
+class ReloginRequired(Exception):
+    """Die Cloud verlangt eine neue Anmeldung – wird ohne Traceback protokolliert."""
+
+
 # ----------------------------------------------------------------------------
 # Hilfsfunktionen
 # ----------------------------------------------------------------------------
@@ -325,6 +333,12 @@ class Bridge:
                 await self.watch()
             except asyncio.CancelledError:
                 raise
+            except (ConfigError, ReloginRequired) as exc:
+                log.error("%s", exc)
+                self.connected = False
+                self.bridge_problem = str(exc)[:200]
+                self.publish_bridge()
+                self.write_status()
             except Exception as exc:  # noqa: BLE001
                 log.exception("Cloud-Verbindung fehlgeschlagen")
                 self.connected = False
@@ -349,7 +363,7 @@ class Bridge:
     async def login(self) -> None:
         account, password = self.cfg.get("account"), self.cfg.get("password")
         if not account or not password:
-            raise RuntimeError("Mammotion-Konto oder Passwort nicht konfiguriert")
+            raise ConfigError("Mammotion-Konto oder Passwort nicht konfiguriert")
         log.info("Login bei der Mammotion-Cloud als %s", account)
         self.client = MammotionClient()
         self.client.on_unrecoverable_auth_error = self._on_auth_error
@@ -447,7 +461,7 @@ class Bridge:
             except TimeoutError:
                 pass
         if self.relogin_requested.is_set() and not self.stop_event.is_set():
-            raise RuntimeError("Neuanmeldung erforderlich")
+            raise ReloginRequired("Mammotion-Cloud verlangt eine neue Anmeldung")
 
     async def request_refresh(self, max_age: float = 0) -> None:
         if self.client is None:
