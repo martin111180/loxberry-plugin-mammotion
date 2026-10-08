@@ -30,7 +30,7 @@ schickt die Werte an den Loxone Miniserver.
 2. Alternativ das ZIP unter [Releases](https://github.com/martin111180/loxberry-plugin-mammotion/releases/latest)
    herunterladen und in der Plugin-Verwaltung hochladen.
 3. Plugin *Mammotion Mähroboter* öffnen, Konto + Passwort eintragen, **Speichern**.
-4. Im Statusbereich erscheinen nach kurzer Zeit die Mäher mit allen Werten, Topics und Loxone-Eingangsnamen.
+4. Im Statusbereich erscheinen nach kurzer Zeit die Mäher mit allen Werten und MQTT-Topics. Die Loxone-Eingangsnamen zeigt das MQTT Gateway an.
 
 ## MQTT-Topics
 

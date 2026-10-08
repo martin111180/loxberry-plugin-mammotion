@@ -145,13 +145,13 @@ LBWeb::lbheader("Mammotion Mähroboter", "", "");
 <?php if (!empty($mm_status['devices'])): foreach ($mm_status['devices'] as $mm_name => $mm_dev): $mm_v = $mm_dev['values'] ?? []; ?>
 <h3><?= h($mm_name) ?></h3>
 <table class="mm-table">
-	<tr><th>Wert</th><th>Inhalt</th><th>MQTT-Topic</th><th>Loxone-Eingang (MQTT Gateway)</th></tr>
+	<tr><th>Wert</th><th>Inhalt</th><th>MQTT-Topic</th></tr>
 	<?php foreach ($mm_v as $mm_k => $mm_val):
 		$mm_t = "$mm_topic/{$mm_dev['key']}/$mm_k";
 		if (is_bool($mm_val)) $mm_val = $mm_val ? 1 : 0;
 		$mm_cls = ($mm_k === 'problem') ? ($mm_val ? 'mm-bad' : 'mm-ok') : '';
 	?>
-	<tr><td><?= h($mm_k) ?></td><td class="<?= $mm_cls ?>"><?= h($mm_val) ?></td><td><code><?= h($mm_t) ?></code></td><td><code><?= h(str_replace('/', '_', $mm_t)) ?></code></td></tr>
+	<tr><td><?= h($mm_k) ?></td><td class="<?= $mm_cls ?>"><?= h($mm_val) ?></td><td><code><?= h($mm_t) ?></code></td></tr>
 	<?php endforeach; ?>
 </table>
 <?php endforeach; endif; ?>
