@@ -38,7 +38,7 @@ jobs:
       - name: Plugin-ZIP bauen
         run: python tools/build_zip.py
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: plugin-zip
           path: dist/*.zip
