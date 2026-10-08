@@ -8,3 +8,5 @@ per MQTT an den LoxBerry-Broker schickt (→ MQTT Gateway → Loxone Miniserver)
 * Vor jedem Commit: `bash -n` für Shell-Skripte, `python tools/build_zip.py` muss durchlaufen
 * Versionsnummer nur in `plugin/plugin.cfg` ändern; `release.cfg` pflegt der Workflow
 * `[AUTHOR]` in `plugin/plugin.cfg` nie ändern (LoxBerry erkennt das Plugin daran)
+* Keine festen `/opt/loxberry`-Pfade – LoxBerry-Platzhalter wie `REPLACELBPBINDIR` verwenden
+* Python-Abhängigkeiten exakt pinnen; Updates kommen über Dependabot-PRs

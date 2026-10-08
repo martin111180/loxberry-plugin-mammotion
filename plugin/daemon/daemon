@@ -1,7 +1,6 @@
 #!/bin/bash
 # Wird vom LoxBerry beim Systemstart als root ausgeführt.
 # Die Bridge selbst läuft als Benutzer loxberry (service.sh wechselt den Benutzer).
-LBHOMEDIR=${LBHOMEDIR:-/opt/loxberry}
-PLUGIN=mammotion
-"$LBHOMEDIR/bin/plugins/$PLUGIN/service.sh" start >/dev/null 2>&1 &
+# REPLACELBPBINDIR ersetzt der LoxBerry bei der Installation durch den Plugin-bin-Ordner.
+REPLACELBPBINDIR/service.sh start >/dev/null 2>&1 &
 exit 0

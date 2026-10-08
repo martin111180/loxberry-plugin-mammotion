@@ -54,7 +54,7 @@ from pymammotion.utility.constant.display import device_mode
 from pymammotion.utility.device_type import DeviceType
 
 PLUGIN = "mammotion"
-LBHOMEDIR = os.environ.get("LBHOMEDIR", "/opt/loxberry")
+LBHOMEDIR = os.environ.get("LBHOMEDIR", "REPLACELBHOMEDIR")  # Platzhalter, ersetzt der LoxBerry bei der Installation
 
 DEFAULT_CONFIG: dict[str, Any] = {
     "enabled": True,

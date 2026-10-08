@@ -1,7 +1,7 @@
 #!/bin/bash
 # Steuerung der Mammotion-Bridge: start | stop | restart | status | watchdog
 PLUGIN=mammotion
-LBHOMEDIR=${LBHOMEDIR:-/opt/loxberry}
+LBHOMEDIR=${LBHOMEDIR:-REPLACELBHOMEDIR}
 
 # Nie als root laufen lassen
 if [ "$(id -u)" = "0" ]; then
@@ -29,6 +29,10 @@ is_enabled() {
 	[ "$("$PY" -c 'import json,sys; print(1 if json.load(open(sys.argv[1])).get("enabled", True) else 0)' "$CFG" 2>/dev/null)" = "1" ]
 }
 
+has_account() {
+	[ "$("$PY" -c 'import json,sys; c=json.load(open(sys.argv[1])); print(1 if c.get("account") and c.get("password") else 0)' "$CFG" 2>/dev/null)" = "1" ]
+}
+
 start() {
 	if is_running; then
 		echo "Läuft bereits (PID $(cat "$PIDFILE"))"
@@ -40,6 +44,10 @@ start() {
 	fi
 	if ! is_enabled; then
 		echo "Bridge ist in der Konfiguration deaktiviert"
+		return 0
+	fi
+	if ! has_account; then
+		echo "Noch kein Mammotion-Konto eingetragen – Bridge startet nach dem Speichern der Zugangsdaten"
 		return 0
 	fi
 	cd "$DATA" || return 1

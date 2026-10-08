@@ -1,4 +1,6 @@
-pymammotion>=0.10.9
-paho-mqtt>=2.1
-# von pymammotion benoetigt, aber dort nicht als Abhaengigkeit deklariert
-packaging
+# Exakte Versionen: jede Installation bekommt genau die geprüfte Kombination.
+# Neue Versionen schlägt Dependabot als Pull Request vor (siehe .github/dependabot.yml).
+pymammotion==0.10.9
+paho-mqtt==2.1.0
+# von pymammotion benötigt, aber dort nicht als Abhängigkeit deklariert
+packaging==26.3

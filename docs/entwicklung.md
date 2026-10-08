@@ -40,9 +40,25 @@ Das ZIP aus `dist/` in der LoxBerry-Plugin-Verwaltung installieren. Log am LoxBe
 `/opt/loxberry/log/plugins/mammotion/mammotion.log`, Bridge steuern mit
 `/opt/loxberry/bin/plugins/mammotion/service.sh {start|stop|restart|status}`.
 
+## Abhängigkeiten (Dependabot)
+
+`plugin/config/requirements.txt` enthält **exakte** Versionen. Dependabot prüft jeden Montag, ob es neue
+Versionen gibt, und öffnet dafür einen Pull Request. Der Workflow testet den PR (Installation, Import,
+ZIP-Build). Ist er grün und läuft das Plugin damit, den PR übernehmen und ein neues Release taggen –
+erst dann kommt die neue Library-Version auf die LoxBerrys.
+
+Der Test prüft nicht den Login bei Mammotion – dafür vor dem Release kurz am echten LoxBerry testen.
+
+## Pfade
+
+Nie `/opt/loxberry` fest eintragen (der Installer warnt sonst). Stattdessen die Platzhalter verwenden,
+die der LoxBerry bei der Installation in allen Textdateien ersetzt, z. B. `REPLACELBHOMEDIR`,
+`REPLACELBPBINDIR`, `REPLACELBPCONFIGDIR`, `REPLACELBPDATADIR`, `REPLACELBPLOGDIR`.
+
 ## Hinweise zu pymammotion
 
 * braucht Python ≥ 3.13 – deshalb installiert `postinstall.sh` per `uv` ein eigenes Python
 * deklariert `packaging` nicht als Abhängigkeit (Stand 0.10.9) – steht deshalb in `plugin/config/requirements.txt`
+* auf LoxBerry 4 (Debian Trixie) nutzt `uv` das vorhandene System-Python 3.13, auf älteren Systemen lädt es eines herunter
 * die Geräteliste kommt aus dem internen `client._device_registry.all_devices` (keine öffentliche API) –
   bei pymammotion-Updates prüfen
