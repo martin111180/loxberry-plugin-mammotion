@@ -1,0 +1,4 @@
+#!/bin/bash
+# Watchdog: startet die Mammotion-Bridge neu, falls sie abgestürzt ist.
+/opt/loxberry/bin/plugins/mammotion/service.sh watchdog >/dev/null 2>&1
+exit 0

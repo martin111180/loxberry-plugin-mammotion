@@ -1,0 +1,4 @@
+pymammotion>=0.10.9
+paho-mqtt>=2.1
+# von pymammotion benoetigt, aber dort nicht als Abhaengigkeit deklariert
+packaging

@@ -1,0 +1,104 @@
+name: Prüfen und Release
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+
+permissions:
+  contents: write
+
+jobs:
+  pruefen:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Shell-Skripte prüfen
+        run: |
+          cd plugin
+          for f in postinstall.sh preupgrade.sh postupgrade.sh bin/service.sh daemon/daemon cron/cron.05min uninstall/uninstall; do
+            bash -n "$f" && echo "ok $f"
+          done
+
+      - name: PHP prüfen
+        run: php -l plugin/webfrontend/htmlauth/index.php
+
+      - name: Python-Abhängigkeiten installieren und Bridge importieren
+        run: |
+          pip install -r plugin/config/requirements.txt
+          python -m py_compile plugin/bin/mammotion_bridge.py tools/build_zip.py
+          cd plugin/bin && python -c "import mammotion_bridge; print('Import ok')"
+
+      - name: Plugin-ZIP bauen
+        run: python tools/build_zip.py
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: plugin-zip
+          path: dist/*.zip
+
+  release:
+    needs: pruefen
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Version prüfen
+        id: ver
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          git checkout "$GITHUB_REF_NAME"
+          CFG=$(python tools/build_zip.py --version)
+          if [ "$TAG" != "$CFG" ]; then
+            echo "::error::Tag v$TAG passt nicht zu VERSION=$CFG in plugin/plugin.cfg"
+            exit 1
+          fi
+          echo "version=$TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Plugin-ZIP bauen
+        run: python tools/build_zip.py
+
+      - name: GitHub-Release anlegen
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/*.zip \
+            --title "Mammotion-Plugin $GITHUB_REF_NAME" \
+            --generate-notes
+
+      - name: release.cfg auf main aktualisieren (LoxBerry-Autoupdate)
+        run: |
+          V=${{ steps.ver.outputs.version }}
+          REPO=https://github.com/${GITHUB_REPOSITORY}
+          git checkout main
+          cat > release.cfg <<EOF
+          # Wird vom LoxBerry für automatische Updates abgefragt (siehe RELEASECFG in plugin/plugin.cfg).
+          # Nicht von Hand pflegen – der Release-Workflow aktualisiert diese Datei bei jedem Tag v*.
+          [AUTOUPDATE]
+          VERSION=$V
+          ARCHIVEURL=$REPO/releases/download/v$V/loxberry-plugin-mammotion-$V.zip
+          INFOURL=$REPO/releases/tag/v$V
+          EOF
+          sed -i 's/^          //' release.cfg
+          if git diff --quiet release.cfg; then
+            echo "release.cfg bereits aktuell"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -am "release.cfg auf Version $V gesetzt"
+          git push origin main

@@ -1,0 +1,20 @@
+{
+  "enabled": true,
+  "account": "",
+  "password": "",
+  "language": "de",
+  "topic": "mammotion",
+  "problem_modes": [17, 18, 23, 37, 38],
+  "error_hold_minutes": 60,
+  "offline_problem_minutes": 30,
+  "republish_seconds": 300,
+  "refresh_seconds": 300,
+  "loglevel": "INFO",
+  "mqtt": {
+    "use_loxberry": true,
+    "host": "localhost",
+    "port": 1883,
+    "user": "",
+    "password": ""
+  }
+}
