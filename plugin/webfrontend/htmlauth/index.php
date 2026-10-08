@@ -67,7 +67,7 @@ function value_meaning($mm_key, $mm_val, $mm_dev_key = '') {
 			$mm_item = h("$mm_code = " . mode_text($mm_code));
 			$mm_rows .= ((string)$mm_code === (string)$mm_val) ? "<b>$mm_item</b><br>" : "$mm_item<br>";
 		}
-		return '<b>' . h("$mm_val = " . mode_text((int)$mm_val)) . '</b><details data-key="' . h($mm_dev_key . '/' . $mm_key) . '"><summary>' . t('UI.ALL_VALUES') . "</summary>$mm_rows</details>";
+		return t('VALUES.MODE') . '<br><b>' . h("$mm_val = " . mode_text((int)$mm_val)) . '</b><details data-key="' . h($mm_dev_key . '/' . $mm_key) . '"><summary>' . t('UI.ALL_VALUES') . "</summary>$mm_rows</details>";
 	}
 	$mm_text = t('VALUES.' . strtoupper($mm_key));
 	if (in_array($mm_key, ['error_time', 'last_report']) && (int)$mm_val > 0) {
@@ -289,13 +289,14 @@ LBWeb::lbheader(tr('UI.TITLE'), "", "");
 		<legend><?= t('UI.PROBLEM_MODES') ?></legend>
 		<?php $mm_selected = array_map('intval', $mm_cfg['problem_modes'] ?? []);
 		foreach ($mm_problem_modes as $mm_code): ?>
-		<label><input type="checkbox" name="problem_modes[]" value="<?= $mm_code ?>" <?= in_array($mm_code, $mm_selected, true) ? 'checked' : '' ?>> <?= h(mode_text($mm_code)) ?></label>
+		<label><input type="checkbox" name="problem_modes[]" value="<?= $mm_code ?>" <?= in_array($mm_code, $mm_selected, true) ? 'checked' : '' ?>> <?= h(mode_text($mm_code) . " ($mm_code)") ?></label>
 		<?php endforeach;
 		// Von Hand eingetragene Codes, die hier nicht aufgelistet sind, beibehalten
 		foreach (array_diff($mm_selected, $mm_problem_modes) as $mm_code): ?>
 		<input type="hidden" name="problem_modes[]" value="<?= (int)$mm_code ?>">
 		<?php endforeach; ?>
 	</fieldset>
+	<p class="mm-hint"><?= t('UI.PROBLEM_MODES_HINT') ?></p>
 	<label for="error_hold_minutes"><?= t('UI.ERROR_HOLD') ?></label>
 	<input type="number" id="error_hold_minutes" name="error_hold_minutes" min="0" value="<?= h($mm_cfg['error_hold_minutes'] ?? 60) ?>">
 	<label for="offline_problem_minutes"><?= t('UI.OFFLINE_LIMIT') ?></label>
