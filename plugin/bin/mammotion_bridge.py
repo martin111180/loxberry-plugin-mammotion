@@ -115,6 +115,65 @@ MODE_TEXT_DE = {
     52: "Wiederherstellung",
 }
 
+MODE_TEXT_EN = {
+    0: "Inactive",
+    1: "Online",
+    2: "Offline",
+    3: "Powered off",
+    8: "Disabled",
+    10: "Initializing",
+    11: "Ready",
+    12: "Not connected",
+    13: "Mowing",
+    14: "Returning to dock",
+    15: "Charging",
+    16: "Updating",
+    17: "Locked",
+    18: "System error",
+    19: "Paused",
+    20: "Manual mowing",
+    22: "Update successful",
+    23: "Update failed",
+    31: "Drawing map",
+    32: "Drawing obstacle",
+    34: "Drawing channel",
+    36: "Editing boundary",
+    37: "Position error",
+    38: "Boundary crossed",
+    39: "Charging pause",
+    45: "Automatic mapping",
+    46: "Mapping paused",
+    47: "Mapping: returning",
+    48: "Sleeping",
+    50: "Returning to charge",
+    51: "Resetting",
+    52: "Recovering",
+}
+
+# Texte, die per MQTT an den Miniserver gehen: Deutsch bei language "de", sonst Englisch
+TEXTS = {
+    "de": {
+        "status": "Status: {mode}",
+        "error": "Fehler {code}: {text}",
+        "offline": "Offline seit {minutes} min",
+        "no_report": "Keine Statusmeldung vom Mäher seit {minutes} min",
+        "cloud_unreachable": "Mammotion-Cloud nicht erreichbar: {error}",
+        "login_rejected": "Mammotion-Login abgelaufen/abgelehnt",
+        "no_account": "Mammotion-Konto oder Passwort nicht konfiguriert",
+        "relogin": "Mammotion-Cloud verlangt eine neue Anmeldung",
+    },
+    "en": {
+        "status": "State: {mode}",
+        "error": "Error {code}: {text}",
+        "offline": "Offline for {minutes} min",
+        "no_report": "No status report from the mower for {minutes} min",
+        "cloud_unreachable": "Mammotion cloud not reachable: {error}",
+        "login_rejected": "Mammotion login expired/rejected",
+        "no_account": "Mammotion account or password not configured",
+        "relogin": "Mammotion cloud requires a new login",
+    },
+}
+
 # Modi, in denen der Mäher offensichtlich wieder normal arbeitet -> gespeicherter Fehler wird quittiert
 RECOVERED_MODES = {13, 20}
 
@@ -344,7 +403,7 @@ class Bridge:
             except Exception as exc:  # noqa: BLE001
                 log.exception("Cloud-Verbindung fehlgeschlagen")
                 self.connected = False
-                self.bridge_problem = f"Mammotion-Cloud nicht erreichbar: {exc}"[:200]
+                self.bridge_problem = self.txt("cloud_unreachable", error=exc)[:200]
                 self.publish_bridge()
                 self.write_status()
             await self.shutdown_client()
@@ -365,7 +424,7 @@ class Bridge:
     async def login(self) -> None:
         account, password = self.cfg.get("account"), self.cfg.get("password")
         if not account or not password:
-            raise ConfigError("Mammotion-Konto oder Passwort nicht konfiguriert")
+            raise ConfigError(self.txt("no_account"))
         log.info("Login bei der Mammotion-Cloud als %s", account)
         self.client = MammotionClient()
         self.client.on_unrecoverable_auth_error = self._on_auth_error
@@ -397,7 +456,7 @@ class Bridge:
     async def _on_auth_error(self, account_id: str, transport_type: Any, exc: Exception) -> None:
         log.error("Authentifizierung dauerhaft fehlgeschlagen (%s): %s", transport_type, exc)
         self.connected = False
-        self.bridge_problem = "Mammotion-Login abgelaufen/abgelehnt"
+        self.bridge_problem = self.txt("login_rejected")
         self.publish_bridge()
         self.relogin_requested.set()
 
@@ -463,7 +522,7 @@ class Bridge:
             except TimeoutError:
                 pass
         if self.relogin_requested.is_set() and not self.stop_event.is_set():
-            raise ReloginRequired("Mammotion-Cloud verlangt eine neue Anmeldung")
+            raise ReloginRequired(self.txt("relogin"))
 
     async def request_refresh(self, max_age: float = 0) -> None:
         if self.client is None:
@@ -531,12 +590,12 @@ class Bridge:
         reasons = []
         mode_text = self.mode_text(mode)
         if mode in self.problem_modes:
-            reasons.append(f"Status: {mode_text}")
+            reasons.append(self.txt("status", mode=mode_text))
         if state.error_code:
-            reasons.append(f"Fehler {state.error_code}: {describe(state.error_code, self.lang)}")
+            reasons.append(self.txt("error", code=state.error_code, text=describe(state.error_code, self.lang)))
         offline_limit = int(self.cfg.get("offline_problem_minutes") or 0) * 60
         if offline_limit and state.offline_since and now - state.offline_since >= offline_limit:
-            reasons.append(f"Offline seit {int((now - state.offline_since) // 60)} min")
+            reasons.append(self.txt("offline", minutes=int((now - state.offline_since) // 60)))
 
         work = raw.report_data.work
         values = {
@@ -572,7 +631,7 @@ class Bridge:
         waited = now - state.waiting_since
         limit = int(self.cfg.get("offline_problem_minutes") or 0) * 60
         if limit and waited >= limit:
-            text = f"Keine Statusmeldung vom Mäher seit {int(waited // 60)} min"
+            text = self.txt("no_report", minutes=int(waited // 60))
             if state.last_values.get("problem_text") != text:
                 log.warning("%s: PROBLEM – %s", state.name, text)
             state.last_values = {**state.last_values, "problem": True, "problem_text": text}
@@ -581,9 +640,12 @@ class Bridge:
         self.publish_summary()
 
     def mode_text(self, mode: int) -> str:
-        if self.lang == "de" and mode in MODE_TEXT_DE:
-            return MODE_TEXT_DE[mode]
-        return device_mode(mode)
+        texts = MODE_TEXT_DE if self.lang == "de" else MODE_TEXT_EN
+        return texts.get(mode) or device_mode(mode)
+
+    def txt(self, key: str, **values: Any) -> str:
+        """Text für MQTT in der eingestellten Sprache (Deutsch oder Englisch)."""
+        return TEXTS["de" if self.lang == "de" else "en"][key].format(**values)
 
     def publish_bridge(self) -> None:
         self.mqtt.publish("bridge/connected", self.connected)

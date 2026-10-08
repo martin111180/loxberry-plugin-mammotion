@@ -73,9 +73,9 @@ Alle Werte werden *retained* gesendet.
 
 ## Loxone-Konfiguration
 
-Das Plugin legt `config/plugins/mammotion/mqtt_subscriptions.cfg` mit `mammotion/#` an – das
-MQTT Gateway abonniert das Topic dadurch automatisch. (Falls nicht: im MQTT Gateway unter
-*Subscriptions* `mammotion/#` eintragen.)
+Das Plugin abonniert bewusst nichts automatisch – welche Werte an den Miniserver gehen, entscheidest
+du im MQTT Gateway. Dort erscheinen alle Topics unter `mammotion`; einfach die gewünschten anhaken
+(oder `mammotion` komplett).
 
 Im Gateway (*Incoming Overview*) erscheinen die Werte, z. B. `mammotion_problem`,
 `mammotion_luba_vsabc123_error_text`. In Loxone Config:
@@ -104,7 +104,8 @@ Wie ein Release erstellt wird, steht in [docs/entwicklung.md](docs/entwicklung.m
 | `plugin/daemon/daemon` | Start beim Booten |
 | `plugin/cron/cron.05min` | Watchdog – startet die Bridge neu, falls abgestürzt |
 | `plugin/webfrontend/htmlauth/index.php` | Weboberfläche |
-| `plugin/config/` | Standardkonfiguration, Python-Requirements, MQTT-Gateway-Abo |
+| `plugin/templates/lang/` | Texte der Weboberfläche (Deutsch, Englisch) |
+| `plugin/config/` | Standardkonfiguration, Python-Requirements |
 | `plugin/postinstall.sh` | installiert `uv`, Python 3.13 und die Pakete nach `data/plugins/mammotion` |
 | `plugin/preupgrade.sh` / `postupgrade.sh` | sichern/wiederherstellen der Konfiguration bei Updates |
 | `tools/build_zip.py` | baut das installierbare ZIP nach `dist/` |

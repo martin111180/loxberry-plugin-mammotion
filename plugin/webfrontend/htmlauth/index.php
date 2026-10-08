@@ -3,7 +3,6 @@ require_once "loxberry_system.php";
 require_once "loxberry_web.php";
 
 $mm_cfgfile    = LBPCONFIGDIR . "/mammotion.json";
-$mm_subsfile   = LBPCONFIGDIR . "/mqtt_subscriptions.cfg";
 $mm_statusfile = LBPDATADIR . "/status.json";
 $mm_logfile    = LBPLOGDIR . "/mammotion.log";
 $mm_service    = LBPBINDIR . "/service.sh";
@@ -20,93 +19,89 @@ function service($mm_cmd) {
 	return trim((string)shell_exec(escapeshellarg($mm_service) . " " . escapeshellarg($mm_cmd) . " </dev/null 2>&1"));
 }
 
-// Alle Gerätestatus (WorkMode) mit deutschem Text – wie MODE_TEXT_DE in mammotion_bridge.py
-$mm_mode_texts = [
-	0 => 'Inaktiv', 1 => 'Online', 2 => 'Offline', 3 => 'Ausgeschaltet', 8 => 'Deaktiviert',
-	10 => 'Initialisierung', 11 => 'Bereit', 12 => 'Nicht verbunden', 13 => 'Mäht', 14 => 'Fährt zur Station',
-	15 => 'Lädt', 16 => 'Update läuft', 17 => 'Gesperrt', 18 => 'Systemfehler', 19 => 'Pausiert',
-	20 => 'Manuelles Mähen', 22 => 'Update erfolgreich', 23 => 'Update fehlgeschlagen', 31 => 'Karte zeichnen',
-	32 => 'Hindernis zeichnen', 34 => 'Kanal zeichnen', 36 => 'Grenze bearbeiten', 37 => 'Positionsfehler',
-	38 => 'Grenzüberschreitung', 39 => 'Ladepause', 45 => 'Automatische Kartierung', 46 => 'Kartierung pausiert',
-	47 => 'Kartierung: Rückkehr', 48 => 'Schlafmodus', 50 => 'Rückkehr zum Laden', 51 => 'Setzt zurück',
-	52 => 'Wiederherstellung',
-];
+// Texte aus templates/lang/language_<sprache>.ini (Sprache des LoxBerry, Englisch als Rückfall)
+$mm_L = LBSystem::readlanguage("language.ini");
 
-// Mögliche Werte bzw. Beschreibung je Topic für die Spalte "Bedeutung"
-$mm_value_choices = [
-	'online'   => [1 => 'mit der Cloud verbunden', 0 => 'offline'],
-	'charging' => [1 => 'an der Ladestation (lädt bzw. hält die Ladung)', 0 => 'nicht an der Ladestation'],
-	'problem'  => [1 => 'Problem – siehe problem_text', 0 => 'alles in Ordnung'],
-];
-$mm_value_desc = [
-	'battery'        => 'Akkustand in Prozent (0–100)',
-	'mode_text'      => 'Gerätestatus als Text',
-	'progress'       => 'Fortschritt der aktuellen Mäh-Aufgabe in Prozent',
-	'problem_text'   => 'Beschreibung des Problems, sonst „OK“',
-	'error_code'     => '0 = kein Fehler, sonst der zuletzt gemeldete neue Mammotion-Fehlercode',
-	'error_text'     => 'Beschreibung zum Fehlercode (leer, wenn kein Fehler)',
-	'error_solution' => 'Lösungsvorschlag von Mammotion (oft leer)',
-	'error_time'     => 'Zeitpunkt des Fehlers als Unix-Zeit, 0 = kein Fehler',
-	'last_report'    => 'Zeitpunkt der letzten Statusmeldung als Unix-Zeit',
-];
+// Übersetzter Text ohne Escaping (für Meldungen, die später escaped werden)
+function tr($mm_key, ...$mm_args) {
+	global $mm_L;
+	$mm_text = $mm_L[$mm_key] ?? $mm_key;
+	return $mm_args ? vsprintf($mm_text, $mm_args) : $mm_text;
+}
+
+// Übersetzter Text, HTML-escaped; %s-Argumente werden unverändert eingesetzt (vorher selbst escapen)
+function t($mm_key, ...$mm_args) {
+	$mm_text = h(tr($mm_key));
+	return $mm_args ? vsprintf($mm_text, $mm_args) : $mm_text;
+}
+
+function date_fmt($mm_ts) {
+	return date(tr('UI.DATE_FORMAT'), (int)$mm_ts);
+}
+
+// Alle Gerätestatus (WorkMode) – wie MODE_TEXT_DE/MODE_TEXT_EN in mammotion_bridge.py
+$mm_mode_codes = [0, 1, 2, 3, 8, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 22, 23, 31, 32, 34, 36, 37, 38, 39, 45, 46, 47, 48, 50, 51, 52];
+
+function mode_text($mm_code) {
+	global $mm_L;
+	return $mm_L["MODES.M$mm_code"] ?? tr('UI.UNKNOWN_MODE');
+}
+
+// Topics mit festen Werten (Spalte "Bedeutung"); Texte in [VALUES] als TOPIC_WERT
+$mm_value_choices = ['online' => [1, 0], 'charging' => [1, 0], 'problem' => [1, 0]];
 
 // Bedeutung eines Werts als HTML: alle Möglichkeiten, der aktuelle Wert fett
 function value_meaning($mm_key, $mm_val) {
-	global $mm_value_choices, $mm_value_desc, $mm_mode_texts;
+	global $mm_value_choices, $mm_mode_codes;
 	if (isset($mm_value_choices[$mm_key])) {
 		$mm_parts = [];
-		foreach ($mm_value_choices[$mm_key] as $mm_code => $mm_text) {
-			$mm_item = h("$mm_code = $mm_text");
+		foreach ($mm_value_choices[$mm_key] as $mm_code) {
+			$mm_item = h("$mm_code = " . tr('VALUES.' . strtoupper($mm_key) . "_$mm_code"));
 			$mm_parts[] = ((string)$mm_code === (string)$mm_val) ? "<b>$mm_item</b>" : $mm_item;
 		}
 		return implode('<br>', $mm_parts);
 	}
 	if ($mm_key === 'mode') {
-		$mm_current = isset($mm_mode_texts[(int)$mm_val]) ? h("$mm_val = " . $mm_mode_texts[(int)$mm_val]) : h("$mm_val = unbekannter Status");
 		$mm_rows = '';
-		foreach ($mm_mode_texts as $mm_code => $mm_text) {
-			$mm_item = h("$mm_code = $mm_text");
+		foreach ($mm_mode_codes as $mm_code) {
+			$mm_item = h("$mm_code = " . mode_text($mm_code));
 			$mm_rows .= ((string)$mm_code === (string)$mm_val) ? "<b>$mm_item</b><br>" : "$mm_item<br>";
 		}
-		return "<b>$mm_current</b><details><summary>alle möglichen Werte</summary>$mm_rows</details>";
+		return '<b>' . h("$mm_val = " . mode_text((int)$mm_val)) . '</b><details><summary>' . t('UI.ALL_VALUES') . "</summary>$mm_rows</details>";
 	}
-	$mm_text = h($mm_value_desc[$mm_key] ?? '');
+	$mm_text = t('VALUES.' . strtoupper($mm_key));
 	if (in_array($mm_key, ['error_time', 'last_report']) && (int)$mm_val > 0) {
-		$mm_text .= '<br><b>' . h(date('d.m.Y H:i:s', (int)$mm_val)) . '</b>';
+		$mm_text .= '<br><b>' . h(date_fmt($mm_val)) . '</b>';
 	}
 	return $mm_text;
 }
 
-// Gerätestatus (WorkMode), die als Problem markiert werden können – Texte wie in mammotion_bridge.py
-$mm_problem_modes = [
-	17 => 'Gesperrt',
-	18 => 'Systemfehler',
-	37 => 'Positionsfehler',
-	38 => 'Grenzüberschreitung',
-	23 => 'Update fehlgeschlagen',
-	19 => 'Pausiert',
-	39 => 'Ladepause',
-	12 => 'Nicht verbunden',
-	3  => 'Ausgeschaltet',
-];
+// Gerätestatus, die als Problem markiert werden können (Reihenfolge der Checkboxen)
+$mm_problem_modes = [17, 18, 37, 38, 23, 19, 39, 12, 3];
 
 function is_running() {
 	return strpos(service('status'), 'running') === 0;
 }
 
-// Ausgabe von service.sh in eine verständliche Meldung übersetzen
-function action_message($mm_action, $mm_output) {
-	$mm_lines = array_values(array_filter(array_map('trim', explode("\n", $mm_output))));
-	$mm_reason = $mm_lines ? end($mm_lines) : '';
+// Ergebnis einer Aktion als [ok, Meldung]; den Grund für "läuft nicht" liefert die Konfiguration
+function action_message($mm_action) {
+	global $mm_cfg;
 	$mm_up = is_running();
 	if ($mm_action === 'stop') {
-		return [!$mm_up, $mm_up ? "Die Bridge konnte nicht gestoppt werden. $mm_reason" : "Die Bridge wurde gestoppt."];
+		return [!$mm_up, tr($mm_up ? 'MSG.STOP_FAILED' : 'MSG.STOPPED')];
 	}
-	$mm_prefix = $mm_action === 'save' ? "Einstellungen gespeichert. " : "";
+	$mm_prefix = $mm_action === 'save' ? tr('MSG.SAVED') . ' ' : '';
 	if ($mm_up) {
-		return [true, $mm_prefix . ($mm_action === 'start' ? "Die Bridge wurde gestartet." : "Die Bridge wurde neu gestartet.")];
+		return [true, $mm_prefix . tr($mm_action === 'start' ? 'MSG.STARTED' : 'MSG.RESTARTED')];
 	}
-	return [false, $mm_prefix . "Die Bridge läuft nicht: $mm_reason"];
+	if (empty($mm_cfg['enabled'])) {
+		$mm_reason = tr('MSG.REASON_DISABLED');
+	} elseif (empty($mm_cfg['account']) || empty($mm_cfg['password'])) {
+		$mm_reason = tr('MSG.REASON_NO_ACCOUNT');
+	} else {
+		$mm_reason = tr('MSG.REASON_UNKNOWN');
+	}
+	return [false, $mm_prefix . tr('MSG.NOT_RUNNING') . ' ' . $mm_reason];
 }
 
 $mm_cfg = read_config($mm_cfgfile);
@@ -143,15 +138,15 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
 
 		$mm_ok = file_put_contents($mm_cfgfile, json_encode($mm_cfg, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)) !== false;
 		@chmod($mm_cfgfile, 0600);
-		// Abonnement für das LoxBerry MQTT Gateway
-		file_put_contents($mm_subsfile, $mm_cfg['topic'] . "/#\n");
 		if ($mm_ok) {
-			[$mm_message_ok, $mm_message] = action_message('save', service('restart'));
+			service('restart');
+			[$mm_message_ok, $mm_message] = action_message('save');
 		} else {
-			[$mm_message_ok, $mm_message] = [false, "Fehler: Die Einstellungen konnten nicht gespeichert werden!"];
+			[$mm_message_ok, $mm_message] = [false, tr('MSG.SAVE_FAILED')];
 		}
 	} elseif (in_array($mm_action, ['start', 'stop', 'restart'])) {
-		[$mm_message_ok, $mm_message] = action_message($mm_action, service($mm_action));
+		service($mm_action);
+		[$mm_message_ok, $mm_message] = action_message($mm_action);
 	}
 }
 
@@ -161,14 +156,14 @@ $mm_topic   = $mm_cfg['topic'] ?? 'mammotion';
 $mm_mqtt    = $mm_cfg['mqtt'] ?? [];
 
 // ---------------------------------------------------------------- Seite
-$navbar[1]['Name'] = "Einstellungen";
+$navbar[1]['Name'] = tr('UI.NAV_SETTINGS');
 $navbar[1]['URL'] = 'index.php';
 $navbar[1]['active'] = true;
-$navbar[2]['Name'] = "Log";
+$navbar[2]['Name'] = tr('UI.NAV_LOG');
 $navbar[2]['URL'] = '/admin/system/tools/logfile.cgi?logfile=' . urlencode($mm_logfile) . '&header=html&format=template';
 $navbar[2]['target'] = '_blank';
 
-LBWeb::lbheader("Mammotion Mähroboter", "", "");
+LBWeb::lbheader(tr('UI.TITLE'), "", "");
 ?>
 <style>
 	.mm-ok { color: #2e7d32; font-weight: bold; }
@@ -188,30 +183,30 @@ LBWeb::lbheader("Mammotion Mähroboter", "", "");
 
 <?php if ($mm_message): ?><div class="mm-msg <?= $mm_message_ok ? 'mm-msg-ok' : 'mm-msg-bad' ?>"><?= h($mm_message) ?></div><?php endif; ?>
 
-<h2>Status</h2>
+<h2><?= t('UI.STATUS') ?></h2>
 <table class="mm-table">
-	<tr><td>Bridge-Dienst</td><td><?= $mm_running ? '<span class="mm-ok">läuft</span>' : '<span class="mm-bad">gestoppt</span>' ?></td></tr>
+	<tr><td><?= t('UI.BRIDGE_SERVICE') ?></td><td><?= $mm_running ? '<span class="mm-ok">' . t('UI.RUNNING') . '</span>' : '<span class="mm-bad">' . t('UI.STOPPED') . '</span>' ?></td></tr>
 	<?php if ($mm_status): ?>
-	<tr><td>Mammotion-Cloud</td><td><?= !empty($mm_status['connected']) ? '<span class="mm-ok">verbunden</span>' : '<span class="mm-bad">nicht verbunden</span>' ?>
+	<tr><td><?= t('UI.CLOUD') ?></td><td><?= !empty($mm_status['connected']) ? '<span class="mm-ok">' . t('UI.CONNECTED') . '</span>' : '<span class="mm-bad">' . t('UI.NOT_CONNECTED') . '</span>' ?>
 		<?= !empty($mm_status['bridge_problem']) ? '<br>' . h($mm_status['bridge_problem']) : '' ?></td></tr>
-	<tr><td>Letzte Aktualisierung</td><td><?= h(date('d.m.Y H:i:s', $mm_status['updated'] ?? 0)) ?></td></tr>
+	<tr><td><?= t('UI.LAST_UPDATE') ?></td><td><?= h(date_fmt($mm_status['updated'] ?? 0)) ?></td></tr>
 	<?php endif; ?>
 </table>
 <form method="post" data-ajax="false" style="display:inline">
-	<button type="submit" name="action" value="restart" data-inline="true" data-mini="true">Neu starten</button>
-	<button type="submit" name="action" value="stop" data-inline="true" data-mini="true">Stoppen</button>
+	<button type="submit" name="action" value="restart" data-inline="true" data-mini="true"><?= t('UI.BTN_RESTART') ?></button>
+	<button type="submit" name="action" value="stop" data-inline="true" data-mini="true"><?= t('UI.BTN_STOP') ?></button>
 </form>
 
 <?php if (!empty($mm_status['devices'])): foreach ($mm_status['devices'] as $mm_name => $mm_dev): $mm_v = $mm_dev['values'] ?? []; ?>
 <h3><?= h($mm_name) ?></h3>
 <?php $mm_wait = (int)($mm_dev['waiting_seconds'] ?? 0);
 if (!empty($mm_dev['waiting']) || $mm_wait > 0 || !$mm_v): ?>
-<div class="mm-msg mm-msg-wait">Warte auf die erste Statusmeldung des Mähers<?= $mm_wait > 0 ? ' (seit ' . ($mm_wait < 120 ? $mm_wait . ' s' : intdiv($mm_wait, 60) . ' min') . ')' : '' ?>.
-	<?= $mm_v ? 'Angezeigt werden die zuletzt bekannten Werte.' : 'Die Werte erscheinen, sobald sich der Mäher meldet – Seite dann neu laden.' ?></div>
+<div class="mm-msg mm-msg-wait"><?= t('UI.WAITING') ?><?= $mm_wait > 0 ? ' ' . t('UI.WAITING_SINCE', $mm_wait < 120 ? $mm_wait . ' s' : intdiv($mm_wait, 60) . ' min') : '' ?>.
+	<?= $mm_v ? t('UI.WAITING_OLD_VALUES') : t('UI.WAITING_NO_VALUES') ?></div>
 <?php endif; ?>
 <?php if ($mm_v): ?>
 <table class="mm-table">
-	<tr><th>Wert</th><th>Inhalt</th><th>Bedeutung</th><th>MQTT-Topic</th></tr>
+	<tr><th><?= t('UI.COL_VALUE') ?></th><th><?= t('UI.COL_CONTENT') ?></th><th><?= t('UI.COL_MEANING') ?></th><th><?= t('UI.COL_TOPIC') ?></th></tr>
 	<?php foreach ($mm_v as $mm_k => $mm_val):
 		$mm_t = "$mm_topic/{$mm_dev['key']}/$mm_k";
 		if (is_bool($mm_val)) $mm_val = $mm_val ? 1 : 0;
@@ -224,75 +219,75 @@ if (!empty($mm_dev['waiting']) || $mm_wait > 0 || !$mm_v): ?>
 <?php endforeach; endif; ?>
 
 <p class="mm-hint">
-	Sammelmeldung für alle Geräte: <code><?= h($mm_topic) ?>/problem</code> (0/1) und <code><?= h($mm_topic) ?>/problem_text</code>.<br>
-	Fehler quittieren: MQTT-Publish auf <code><?= h($mm_topic) ?>/cmd/reset</code> (alle) bzw. <code><?= h($mm_topic) ?>/&lt;gerät&gt;/cmd/reset</code>.
+	<?= t('UI.HINT_SUMMARY', '<code>' . h($mm_topic) . '/problem</code>', '<code>' . h($mm_topic) . '/problem_text</code>') ?><br>
+	<?= t('UI.HINT_RESET', '<code>' . h($mm_topic) . '/cmd/reset</code>', '<code>' . h($mm_topic . '/' . tr('UI.DEVICE_PLACEHOLDER') . '/cmd/reset') . '</code>') ?>
 </p>
 
-<h2>Einstellungen</h2>
+<h2><?= t('UI.SETTINGS') ?></h2>
 <form method="post" data-ajax="false">
 	<input type="hidden" name="action" value="save">
 
-	<label><input type="checkbox" name="enabled" <?= !empty($mm_cfg['enabled']) ? 'checked' : '' ?>> Bridge aktiviert</label>
+	<label><input type="checkbox" name="enabled" <?= !empty($mm_cfg['enabled']) ? 'checked' : '' ?>> <?= t('UI.ENABLED') ?></label>
 
-	<h3>Mammotion-Konto</h3>
-	<label for="account">E-Mail / Konto der Mammotion-App</label>
+	<h3><?= t('UI.ACCOUNT') ?></h3>
+	<label for="account"><?= t('UI.ACCOUNT_EMAIL') ?></label>
 	<input type="text" id="account" name="account" value="<?= h($mm_cfg['account'] ?? '') ?>" autocomplete="off">
-	<label for="password">Passwort <?= !empty($mm_cfg['password']) ? '(gespeichert – leer lassen, um es beizubehalten)' : '' ?></label>
+	<label for="password"><?= t('UI.PASSWORD') ?> <?= !empty($mm_cfg['password']) ? t('UI.PASSWORD_SAVED') : '' ?></label>
 	<input type="password" id="password" name="password" value="" autocomplete="new-password">
-	<p class="mm-hint">Tipp: Lege in der Mammotion-App ein zweites Konto an und teile den Mäher damit.
-		So wird dein Haupt-Login in der App nicht durch die Bridge abgemeldet.</p>
+	<p class="mm-hint"><?= t('UI.ACCOUNT_TIP') ?></p>
 
-	<h3>Problemerkennung</h3>
+	<h3><?= t('UI.PROBLEMS') ?></h3>
 	<fieldset data-role="controlgroup">
-		<legend>Diese Gerätestatus als Problem melden:</legend>
+		<legend><?= t('UI.PROBLEM_MODES') ?></legend>
 		<?php $mm_selected = array_map('intval', $mm_cfg['problem_modes'] ?? []);
-		foreach ($mm_problem_modes as $mm_code => $mm_label): ?>
-		<label><input type="checkbox" name="problem_modes[]" value="<?= $mm_code ?>" <?= in_array($mm_code, $mm_selected, true) ? 'checked' : '' ?>> <?= h($mm_label) ?></label>
+		foreach ($mm_problem_modes as $mm_code): ?>
+		<label><input type="checkbox" name="problem_modes[]" value="<?= $mm_code ?>" <?= in_array($mm_code, $mm_selected, true) ? 'checked' : '' ?>> <?= h(mode_text($mm_code)) ?></label>
 		<?php endforeach;
 		// Von Hand eingetragene Codes, die hier nicht aufgelistet sind, beibehalten
-		foreach (array_diff($mm_selected, array_keys($mm_problem_modes)) as $mm_code): ?>
+		foreach (array_diff($mm_selected, $mm_problem_modes) as $mm_code): ?>
 		<input type="hidden" name="problem_modes[]" value="<?= (int)$mm_code ?>">
 		<?php endforeach; ?>
 	</fieldset>
-	<label for="error_hold_minutes">Gemeldeten Fehler so lange als Problem halten (Minuten, 0 = bis Quittierung)</label>
+	<label for="error_hold_minutes"><?= t('UI.ERROR_HOLD') ?></label>
 	<input type="number" id="error_hold_minutes" name="error_hold_minutes" min="0" value="<?= h($mm_cfg['error_hold_minutes'] ?? 60) ?>">
-	<label for="offline_problem_minutes">Offline länger als … Minuten = Problem (0 = aus)</label>
+	<label for="offline_problem_minutes"><?= t('UI.OFFLINE_LIMIT') ?></label>
 	<input type="number" id="offline_problem_minutes" name="offline_problem_minutes" min="0" value="<?= h($mm_cfg['offline_problem_minutes'] ?? 30) ?>">
-	<label for="refresh_seconds">Status spätestens alle … Sekunden anfordern (0 = nur automatisch)</label>
+	<label for="refresh_seconds"><?= t('UI.REFRESH') ?></label>
 	<input type="number" id="refresh_seconds" name="refresh_seconds" min="0" value="<?= h($mm_cfg['refresh_seconds'] ?? 300) ?>">
-	<label for="language">Sprache der Fehlertexte</label>
+	<label for="language"><?= t('UI.LANGUAGE') ?></label>
 	<select id="language" name="language">
 		<?php foreach (['de' => 'Deutsch', 'en' => 'English', 'fr' => 'Français', 'it' => 'Italiano', 'nl' => 'Nederlands'] as $mm_code => $mm_label): ?>
 		<option value="<?= $mm_code ?>" <?= ($mm_cfg['language'] ?? 'de') === $mm_code ? 'selected' : '' ?>><?= $mm_label ?></option>
 		<?php endforeach; ?>
 	</select>
+	<p class="mm-hint"><?= t('UI.LANGUAGE_HINT') ?></p>
 
-	<h3>MQTT</h3>
-	<label for="topic">Basis-Topic</label>
+	<h3><?= t('UI.MQTT') ?></h3>
+	<label for="topic"><?= t('UI.BASE_TOPIC') ?></label>
 	<input type="text" id="topic" name="topic" value="<?= h($mm_topic) ?>">
-	<label for="republish_seconds">Alle Werte erneut senden alle … Sekunden</label>
+	<label for="republish_seconds"><?= t('UI.REPUBLISH') ?></label>
 	<input type="number" id="republish_seconds" name="republish_seconds" min="30" value="<?= h($mm_cfg['republish_seconds'] ?? 300) ?>">
 	<?php $mm_use_lb = !isset($mm_mqtt['use_loxberry']) || $mm_mqtt['use_loxberry']; ?>
-	<label><input type="checkbox" id="mqtt_use_loxberry" name="mqtt_use_loxberry" <?= $mm_use_lb ? 'checked' : '' ?>> Broker-Zugangsdaten des LoxBerry verwenden (empfohlen)</label>
+	<label><input type="checkbox" id="mqtt_use_loxberry" name="mqtt_use_loxberry" <?= $mm_use_lb ? 'checked' : '' ?>> <?= t('UI.USE_LOXBERRY') ?></label>
 	<div id="mm-mqtt-manual"<?= $mm_use_lb ? ' style="display:none"' : '' ?>>
-	<label for="mqtt_host">Broker-Host</label>
+	<label for="mqtt_host"><?= t('UI.BROKER_HOST') ?></label>
 	<input type="text" id="mqtt_host" name="mqtt_host" value="<?= h($mm_mqtt['host'] ?? 'localhost') ?>">
-	<label for="mqtt_port">Port</label>
+	<label for="mqtt_port"><?= t('UI.BROKER_PORT') ?></label>
 	<input type="number" id="mqtt_port" name="mqtt_port" value="<?= h($mm_mqtt['port'] ?? 1883) ?>">
-	<label for="mqtt_user">Benutzer</label>
+	<label for="mqtt_user"><?= t('UI.BROKER_USER') ?></label>
 	<input type="text" id="mqtt_user" name="mqtt_user" value="<?= h($mm_mqtt['user'] ?? '') ?>" autocomplete="off">
-	<label for="mqtt_password">Passwort <?= !empty($mm_mqtt['password']) ? '(gespeichert)' : '' ?></label>
+	<label for="mqtt_password"><?= t('UI.BROKER_PASSWORD') ?> <?= !empty($mm_mqtt['password']) ? t('UI.BROKER_PASSWORD_SAVED') : '' ?></label>
 	<input type="password" id="mqtt_password" name="mqtt_password" value="" autocomplete="new-password">
 	</div>
 
-	<h3>Protokoll</h3>
+	<h3><?= t('UI.LOGGING') ?></h3>
 	<select id="loglevel" name="loglevel">
 		<?php foreach (['ERROR', 'WARNING', 'INFO', 'DEBUG'] as $mm_lvl): ?>
 		<option value="<?= $mm_lvl ?>" <?= ($mm_cfg['loglevel'] ?? 'INFO') === $mm_lvl ? 'selected' : '' ?>><?= $mm_lvl ?></option>
 		<?php endforeach; ?>
 	</select>
 
-	<button type="submit" data-icon="check">Speichern und Bridge neu starten</button>
+	<button type="submit" data-icon="check"><?= t('UI.SAVE') ?></button>
 </form>
 
 <script>

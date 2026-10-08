@@ -40,6 +40,15 @@ Das ZIP aus `dist/` in der LoxBerry-Plugin-Verwaltung installieren. Log am LoxBe
 `/opt/loxberry/log/plugins/mammotion/mammotion.log`, Bridge steuern mit
 `/opt/loxberry/bin/plugins/mammotion/service.sh {start|stop|restart|status}`.
 
+## Sprachen
+
+Die Weboberfläche folgt der Sprache des LoxBerry. Texte stehen in `plugin/templates/lang/language_de.ini`
+und `language_en.ini` (Abschnitte `[UI]`, `[MSG]`, `[VALUES]`, `[MODES]`); fehlt ein Eintrag, nimmt LoxBerry
+den englischen. Neue Sprache = weitere Datei `language_<code>.ini`.
+
+Die per MQTT gesendeten Texte (`mode_text`, `problem_text`) richten sich nach der Einstellung „Sprache der
+MQTT-Texte“: Deutsch bei `de`, sonst Englisch. Fehlertexte kommen in allen Sprachen der Mammotion-Tabelle.
+
 ## Abhängigkeiten (Dependabot)
 
 `plugin/config/requirements.txt` enthält **exakte** Versionen. Dependabot prüft jeden Montag, ob es neue
