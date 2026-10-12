@@ -124,6 +124,8 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
 		$mm_cfg['topic'] = $mm_topic !== '' ? $mm_topic : 'mammotion';
 		$mm_modes = array_filter((array)($_POST['problem_modes'] ?? []), 'is_numeric');
 		$mm_cfg['problem_modes'] = array_values(array_unique(array_map('intval', $mm_modes)));
+		$mm_ignore = array_filter(array_map('trim', explode(',', $_POST['ignore_error_codes'] ?? '')), 'is_numeric');
+		$mm_cfg['ignore_error_codes'] = array_values(array_unique(array_map(fn($c) => abs((int)$c), $mm_ignore)));
 		foreach (['error_hold_minutes', 'offline_problem_minutes', 'refresh_seconds', 'republish_seconds'] as $mm_k) {
 			$mm_cfg[$mm_k] = max(0, intval($_POST[$mm_k] ?? 0));
 		}
@@ -344,6 +346,9 @@ LBWeb::lbheader(tr('UI.TITLE'), "", "");
 	<p class="mm-hint"><?= t('UI.PROBLEM_MODES_HINT') ?></p>
 	<label for="error_hold_minutes"><?= t('UI.ERROR_HOLD') ?></label>
 	<input type="number" id="error_hold_minutes" name="error_hold_minutes" min="0" value="<?= h($mm_cfg['error_hold_minutes'] ?? 60) ?>">
+	<label for="ignore_error_codes"><?= t('UI.IGNORE_CODES') ?></label>
+	<input type="text" id="ignore_error_codes" name="ignore_error_codes" value="<?= h(implode(', ', $mm_cfg['ignore_error_codes'] ?? [1307])) ?>">
+	<p class="mm-hint"><?= t('UI.IGNORE_CODES_HINT') ?></p>
 	<label for="offline_problem_minutes"><?= t('UI.OFFLINE_LIMIT') ?></label>
 	<input type="number" id="offline_problem_minutes" name="offline_problem_minutes" min="0" value="<?= h($mm_cfg['offline_problem_minutes'] ?? 30) ?>">
 	<label for="refresh_seconds"><?= t('UI.REFRESH') ?></label>

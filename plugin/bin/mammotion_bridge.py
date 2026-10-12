@@ -67,6 +67,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
     # 37 Positionsfehler, 38 Grenzüberschreitung
     "problem_modes": [17, 18, 23, 37, 38],
     "error_hold_minutes": 60,
+    # Fehlercodes, die nie als Problem gemeldet werden (1307 = erfolgreich angedockt, eine Info)
+    "ignore_error_codes": [1307],
     "offline_problem_minutes": 30,
     "republish_seconds": 300,
     "refresh_seconds": 300,
@@ -177,6 +179,34 @@ TEXTS = {
 # Modi, in denen der Mäher offensichtlich wieder normal arbeitet -> gespeicherter Fehler wird quittiert
 RECOVERED_MODES = {13, 20}
 
+# Normale Betriebszustände: wechselt der Mäher nach einem Fehler in einen davon, ist der Fehler erledigt
+# (11 Bereit, 13 Mäht, 14 Fährt zur Station, 15 Lädt, 20 Manuelles Mähen)
+NORMAL_MODES = {11, 13, 14, 15, 20}
+
+# Codes, die nur aus der Mäher-Firmware stammen und in der Mammotion-Tabelle keine deutsche
+# Übersetzung haben (pymammotion liefert dafür nur eigenen englischen Text)
+FIRMWARE_ERRORS_DE = {
+    1307: ("Angedockt: Infrarot-Anfahrt zur Ladestation abgeschlossen", ""),
+    5002: ("Kamera: viel Wasser im Bild erkannt", "Prüfe, ob vor dem Roboter Wasser steht, und wische die Kameralinsen ab."),
+    5004: ("Kamera: Wasser im Bild erkannt", "Prüfe, ob vor dem Roboter Wasser steht, und wische die Kameralinsen ab."),
+    9009: ("Speicher voll: ein Systemprozess wurde beendet", "Roboter neu starten."),
+    9010: ("Speicher voll: ein Plattformdienst wurde beendet", "Roboter neu starten."),
+    9011: ("Speicher voll: der Navigationsprozess wurde beendet", "Roboter neu starten."),
+    9012: ("Speicher voll: der Kamera-Erkennungsprozess wurde beendet", "Roboter neu starten."),
+    9013: ("Speicher voll: ein Positionierungsprozess wurde beendet", "Roboter neu starten."),
+    11131: ("Messer gestoppt: hinterer Anhebesensor beim Rückwärtsfahren ausgelöst", ""),
+    11132: ("Messer gestoppt: Radschlupf beim Rückwärtsfahren erkannt", ""),
+    11133: ("Messer gestoppt: hinterer Anhebesensor beim Drehen auf der Stelle ausgelöst", ""),
+    11134: ("Messer gestoppt: Radschlupf beim Drehen auf der Stelle erkannt", ""),
+    11135: ("Messer gestoppt: weiter rückwärts gefahren als für das Messer zulässig", ""),
+    8000031: ("Ein Systemprozess ist abgestürzt", "Roboter neu starten."),
+    8000032: ("Ein Plattformdienst ist abgestürzt", "Roboter neu starten."),
+    8000033: ("Der Navigationsprozess ist abgestürzt", "Roboter neu starten."),
+    8000034: ("Der Kamera-Erkennungsprozess ist abgestürzt", "Roboter neu starten."),
+    8000035: ("Ein Positionierungsprozess ist abgestürzt", "Roboter neu starten."),
+    8000036: ("Absturzprotokoll des Systemkerns von einem früheren Lauf gefunden", "Roboter neu starten."),
+}
+
 log = logging.getLogger("mammotion_bridge")
 
 
@@ -245,6 +275,18 @@ def loxberry_mqtt_settings() -> dict:
         pass
     log.warning("Keine LoxBerry-MQTT-Zugangsdaten gefunden – verwende localhost:1883 ohne Login")
     return {"host": "localhost", "port": 1883, "user": "", "password": ""}
+
+
+def error_text(code: int, lang: str) -> str:
+    if lang == "de" and code in FIRMWARE_ERRORS_DE:
+        return FIRMWARE_ERRORS_DE[code][0]
+    return describe(code, lang)
+
+
+def error_solution(code: int, lang: str) -> str:
+    if lang == "de" and code in FIRMWARE_ERRORS_DE:
+        return FIRMWARE_ERRORS_DE[code][1]
+    return solution(code, lang)
 
 
 def topic_key(name: str) -> str:
@@ -343,6 +385,8 @@ class MowerState:
         self.error_code = 0
         self.error_time = 0
         self.error_source = ""
+        # Gerätestatus beim Fehler (None = noch nicht ausgewertet)
+        self.error_mode: int | None = None
         self.offline_since: float | None = None
         # Seit wann auf die erste Statusmeldung gewartet wird (None = Meldung liegt vor)
         self.waiting_since: float | None = None
@@ -353,7 +397,8 @@ class MowerState:
         self.error_code = abs(int(code))
         self.error_time = int(when)
         self.error_source = source
-        log.warning("%s: Fehler %s (%s) – %s", self.name, self.error_code, source, describe(self.error_code, "de"))
+        self.error_mode = None
+        log.warning("%s: Fehler %s (%s) – %s", self.name, self.error_code, source, error_text(self.error_code, "de"))
 
     def clear_error(self, reason: str) -> None:
         if self.error_code:
@@ -361,6 +406,7 @@ class MowerState:
         self.error_code = 0
         self.error_time = 0
         self.error_source = ""
+        self.error_mode = None
 
 
 class Bridge:
@@ -497,7 +543,7 @@ class Bridge:
                 identifier, value = getattr(params, "identifier", None), getattr(params, "value", None)
             if identifier in ("device_warning_event", "device_warning_code_event"):
                 code = value.get("code") if isinstance(value, dict) else getattr(value, "code", None)
-                if code:
+                if code and not self.is_ignored(code, name):
                     self.mowers[name].set_error(code, time.time(), identifier)
                     self.evaluate(name)
 
@@ -571,14 +617,19 @@ class Bridge:
                 state.baseline_error = head
             elif head != state.baseline_error:
                 state.baseline_error = head
-                state.set_error(head[0], now, "Fehlerliste")
+                if not self.is_ignored(head[0], name):
+                    state.set_error(head[0], now, "Fehlerliste")
         elif state.baseline_error is None and codes:
             state.baseline_error = (0, 0)
 
         # Gespeicherten Fehler automatisch quittieren
         if state.error_code:
+            if state.error_mode is None:
+                state.error_mode = mode
             if hold and now - state.error_time > hold:
                 state.clear_error("Haltezeit abgelaufen")
+            elif mode in NORMAL_MODES and mode != state.error_mode:
+                state.clear_error(f"Mäher wieder im normalen Betrieb: {MODE_TEXT_DE.get(mode, mode)}")
             elif mode in RECOVERED_MODES and now - state.error_time > 120:
                 state.clear_error("Mäher arbeitet wieder")
 
@@ -593,7 +644,7 @@ class Bridge:
         if mode in self.problem_modes:
             reasons.append(self.txt("status", mode=mode_text))
         if state.error_code:
-            reasons.append(self.txt("error", code=state.error_code, text=describe(state.error_code, self.lang)))
+            reasons.append(self.txt("error", code=state.error_code, text=error_text(state.error_code, self.lang)))
         offline_limit = int(self.cfg.get("offline_problem_minutes") or 0) * 60
         if offline_limit and state.offline_since and now - state.offline_since >= offline_limit:
             reasons.append(self.txt("offline", minutes=int((now - state.offline_since) // 60)))
@@ -609,8 +660,8 @@ class Bridge:
             "problem": bool(reasons),
             "problem_text": "; ".join(reasons) if reasons else "OK",
             "error_code": state.error_code,
-            "error_text": describe(state.error_code, self.lang) if state.error_code else "",
-            "error_solution": solution(state.error_code, self.lang) if state.error_code else "",
+            "error_text": error_text(state.error_code, self.lang) if state.error_code else "",
+            "error_solution": error_solution(state.error_code, self.lang) if state.error_code else "",
             "error_time": state.error_time,
             "last_report": int(now - handle.report_data_age) if handle.last_report_data_at else 0,
         }
@@ -646,6 +697,13 @@ class Bridge:
             self.mqtt.publish(f"{state.key}/problem", True)
             self.mqtt.publish(f"{state.key}/problem_text", text)
         self.publish_summary()
+
+    def is_ignored(self, code: int, name: str) -> bool:
+        ignored = {abs(int(c)) for c in self.cfg.get("ignore_error_codes") or []}
+        if abs(int(code)) in ignored:
+            log.info("%s: Fehlercode %s ignoriert (Einstellung)", name, abs(int(code)))
+            return True
+        return False
 
     def mode_text(self, mode: int) -> str:
         texts = MODE_TEXT_DE if self.lang == "de" else MODE_TEXT_EN

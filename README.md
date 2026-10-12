@@ -67,7 +67,9 @@ Alle Werte werden *retained* gesendet.
 * der Mäher ist in einem Status, der in den Einstellungen angehakt ist (Standard: Gesperrt, Systemfehler,
   Positionsfehler, Grenzüberschreitung, Update fehlgeschlagen; zusätzlich wählbar u. a. Pausiert, Ladepause)
 * der Mäher meldet einen **neuen** Fehlercode (Warn-Ereignis oder neuer Eintrag in der Fehlerliste) –
-  bleibt für die eingestellte Haltezeit aktiv, bis er quittiert wird oder der Mäher wieder mäht
+  erlischt, sobald der Mäher danach wieder normal arbeitet (Bereit, Mäht, Fährt zur Station, Lädt),
+  quittiert wird oder die Haltezeit abläuft. Codes in „Fehlercodes ignorieren“ (Standard: 1307 =
+  erfolgreich angedockt) gelten nie als Problem.
 * der Mäher ist länger als X Minuten offline (einstellbar, 0 = aus)
 * die Cloud-Anmeldung funktioniert nicht
 
