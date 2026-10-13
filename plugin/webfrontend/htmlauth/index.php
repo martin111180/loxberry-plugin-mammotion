@@ -104,6 +104,76 @@ function action_message($mm_action) {
 	return [false, $mm_prefix . tr('MSG.NOT_RUNNING') . ' ' . $mm_reason];
 }
 
+// ---------------------------------------------------------------- Sichern / Wiederherstellen
+
+// Exportdatei: Einstellungen mit Kennung, Plugin-Version und Datum; Passwörter nur auf Wunsch
+function export_settings($mm_cfg, $mm_with_passwords) {
+	if (!$mm_with_passwords) {
+		unset($mm_cfg['password']);
+		if (isset($mm_cfg['mqtt'])) {
+			unset($mm_cfg['mqtt']['password']);
+		}
+	}
+	return [
+		'plugin'   => 'mammotion',
+		'version'  => method_exists('LBSystem', 'pluginversion') ? (string)LBSystem::pluginversion() : '',
+		'exported' => date('c'),
+		'settings' => $mm_cfg,
+	];
+}
+
+function int_list($mm_value) {
+	return array_values(array_unique(array_map(fn($c) => abs((int)$c), array_filter((array)$mm_value, 'is_numeric'))));
+}
+
+// Einstellungen aus einer Exportdatei übernehmen: nur bekannte Felder, Typen prüfen,
+// fehlende Passwörter behalten den gespeicherten Wert. Gibt [neue Konfiguration, Fehlerschlüssel] zurück.
+function import_settings($mm_json, $mm_old) {
+	$mm_data = json_decode((string)$mm_json, true);
+	if (!is_array($mm_data) || ($mm_data['plugin'] ?? '') !== 'mammotion' || !is_array($mm_data['settings'] ?? null)) {
+		return [null, 'MSG.IMPORT_INVALID'];
+	}
+	$mm_in = $mm_data['settings'];
+	$mm_new = $mm_old;
+	foreach (['enabled'] as $mm_k) {
+		if (array_key_exists($mm_k, $mm_in)) $mm_new[$mm_k] = (bool)$mm_in[$mm_k];
+	}
+	if (isset($mm_in['account'])) $mm_new['account'] = trim((string)$mm_in['account']);
+	if (isset($mm_in['password']) && $mm_in['password'] !== '') $mm_new['password'] = (string)$mm_in['password'];
+	if (isset($mm_in['language'])) $mm_new['language'] = preg_replace('/[^a-z]/', '', (string)$mm_in['language']) ?: 'de';
+	if (isset($mm_in['topic'])) {
+		$mm_topic = trim(preg_replace('#[^A-Za-z0-9_/\-]#', '', (string)$mm_in['topic']), '/');
+		$mm_new['topic'] = $mm_topic !== '' ? $mm_topic : 'mammotion';
+	}
+	foreach (['problem_modes', 'ignore_error_codes'] as $mm_k) {
+		if (isset($mm_in[$mm_k])) $mm_new[$mm_k] = int_list($mm_in[$mm_k]);
+	}
+	foreach (['error_hold_minutes', 'offline_problem_minutes', 'refresh_seconds', 'republish_seconds'] as $mm_k) {
+		if (isset($mm_in[$mm_k])) $mm_new[$mm_k] = max(0, (int)$mm_in[$mm_k]);
+	}
+	if (isset($mm_in['loglevel']) && in_array($mm_in['loglevel'], ['DEBUG', 'INFO', 'WARNING', 'ERROR'], true)) {
+		$mm_new['loglevel'] = $mm_in['loglevel'];
+	}
+	if (is_array($mm_in['mqtt'] ?? null)) {
+		$mm_m = $mm_in['mqtt'];
+		$mm_mqtt = $mm_old['mqtt'] ?? [];
+		if (array_key_exists('use_loxberry', $mm_m)) $mm_mqtt['use_loxberry'] = (bool)$mm_m['use_loxberry'];
+		if (isset($mm_m['host'])) $mm_mqtt['host'] = trim((string)$mm_m['host']);
+		if (isset($mm_m['port'])) $mm_mqtt['port'] = (int)$mm_m['port'] ?: 1883;
+		if (isset($mm_m['user'])) $mm_mqtt['user'] = trim((string)$mm_m['user']);
+		if (isset($mm_m['password']) && $mm_m['password'] !== '') $mm_mqtt['password'] = (string)$mm_m['password'];
+		$mm_new['mqtt'] = $mm_mqtt;
+	}
+	return [$mm_new, null];
+}
+
+function write_config($mm_cfg) {
+	global $mm_cfgfile;
+	$mm_ok = file_put_contents($mm_cfgfile, json_encode($mm_cfg, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)) !== false;
+	@chmod($mm_cfgfile, 0600);
+	return $mm_ok;
+}
+
 $mm_cfg = read_config($mm_cfgfile);
 $mm_page = (($_GET['page'] ?? '') === 'settings') ? 'settings' : 'status';
 $mm_message = "";
@@ -112,6 +182,14 @@ $mm_message_ok = true;
 // ---------------------------------------------------------------- Aktionen
 if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
 	$mm_action = $_POST['action'] ?? '';
+	if ($mm_action === 'export') {
+		$mm_export = export_settings($mm_cfg, isset($_POST['with_passwords']));
+		header('Content-Type: application/json; charset=utf-8');
+		header('Content-Disposition: attachment; filename="mammotion-einstellungen.json"');
+		header('Cache-Control: no-store');
+		echo json_encode($mm_export, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+		exit;
+	}
 	if ($mm_action === 'save') {
 		$mm_page = 'settings';
 		$mm_cfg['enabled']  = isset($_POST['enabled']);
@@ -140,13 +218,30 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
 		}
 		$mm_cfg['mqtt'] = $mm_mqtt;
 
-		$mm_ok = file_put_contents($mm_cfgfile, json_encode($mm_cfg, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)) !== false;
-		@chmod($mm_cfgfile, 0600);
+		$mm_ok = write_config($mm_cfg);
 		if ($mm_ok) {
 			service('restart');
 			[$mm_message_ok, $mm_message] = action_message('save');
 		} else {
 			[$mm_message_ok, $mm_message] = [false, tr('MSG.SAVE_FAILED')];
+		}
+	} elseif ($mm_action === 'import') {
+		$mm_page = 'settings';
+		$mm_upload = $_FILES['settings_file'] ?? null;
+		if (!$mm_upload || ($mm_upload['error'] ?? 1) !== UPLOAD_ERR_OK || ($mm_upload['size'] ?? 0) > 100000) {
+			[$mm_message_ok, $mm_message] = [false, tr('MSG.IMPORT_NO_FILE')];
+		} else {
+			[$mm_new, $mm_error] = import_settings(file_get_contents($mm_upload['tmp_name']), $mm_cfg);
+			if ($mm_error) {
+				[$mm_message_ok, $mm_message] = [false, tr($mm_error)];
+			} elseif (!write_config($mm_new)) {
+				[$mm_message_ok, $mm_message] = [false, tr('MSG.SAVE_FAILED')];
+			} else {
+				$mm_cfg = $mm_new;
+				service('restart');
+				[$mm_message_ok, $mm_message] = action_message('restart');
+				$mm_message = tr('MSG.IMPORTED') . ' ' . $mm_message;
+			}
 		}
 	} elseif (in_array($mm_action, ['start', 'stop', 'restart'])) {
 		service($mm_action);
@@ -387,6 +482,22 @@ LBWeb::lbheader(tr('UI.TITLE'), "", "");
 	</select>
 
 	<button type="submit" data-icon="check"><?= t('UI.SAVE') ?></button>
+</form>
+
+<h3><?= t('UI.BACKUP') ?></h3>
+<p class="mm-hint"><?= t('UI.BACKUP_HINT') ?></p>
+<form method="post" action="index.php?page=settings" data-ajax="false">
+	<input type="hidden" name="action" value="export">
+	<label><input type="checkbox" name="with_passwords"> <?= t('UI.EXPORT_PASSWORDS') ?></label>
+	<p class="mm-hint"><?= t('UI.EXPORT_PASSWORDS_HINT') ?></p>
+	<button type="submit" data-icon="arrow-d"><?= t('UI.EXPORT') ?></button>
+</form>
+<form method="post" action="index.php?page=settings" enctype="multipart/form-data" data-ajax="false">
+	<input type="hidden" name="action" value="import">
+	<label for="settings_file"><?= t('UI.IMPORT_FILE') ?></label>
+	<input type="file" id="settings_file" name="settings_file" accept=".json,application/json">
+	<p class="mm-hint"><?= t('UI.IMPORT_HINT') ?></p>
+	<button type="submit" data-icon="arrow-u"><?= t('UI.IMPORT') ?></button>
 </form>
 
 <script>

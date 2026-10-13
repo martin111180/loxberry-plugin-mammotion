@@ -91,6 +91,12 @@ Im Gateway (*Incoming Overview*) erscheinen die Werte, z. B. `mammotion_problem`
 Beispiel: `mammotion_problem` → Baustein *Meldung/Benachrichtigung* bzw. Push an die App mit
 `mammotion_problem_text` als Text.
 
+## Einstellungen sichern
+
+Im Reiter **Einstellungen** unten unter *Sichern / Wiederherstellen* lassen sich alle Einstellungen als
+`mammotion-einstellungen.json` herunterladen und nach einer Neuinstallation wieder hochladen.
+Passwörter werden nur mitexportiert, wenn das Häkchen gesetzt ist (dann stehen sie im Klartext in der Datei).
+
 ## Updates
 
 Neue Versionen erkennt der LoxBerry automatisch (Plugin-Verwaltung → Auto-Update je Plugin einstellbar).
