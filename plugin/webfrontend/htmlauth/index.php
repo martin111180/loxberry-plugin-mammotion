@@ -9,9 +9,45 @@ $mm_service    = LBPBINDIR . "/service.sh";
 
 function h($s) { return htmlspecialchars((string)$s, ENT_QUOTES, 'UTF-8'); }
 
+// Standardwerte – müssen DEFAULT_CONFIG in mammotion_bridge.py entsprechen.
+// Ergänzen fehlende Einstellungen (z. B. nach Updates mit neuen Optionen), damit Oberfläche und Export vollständig sind.
+$mm_defaults = [
+	'enabled' => true,
+	'account' => '',
+	'password' => '',
+	'language' => 'de',
+	'topic' => 'mammotion',
+	'problem_modes' => [17, 18, 23, 37, 38],
+	'error_hold_minutes' => 60,
+	'ignore_error_codes' => [1307],
+	'offline_problem_minutes' => 30,
+	'republish_seconds' => 300,
+	'refresh_seconds' => 300,
+	'loglevel' => 'INFO',
+	'mqtt' => ['use_loxberry' => true, 'host' => 'localhost', 'port' => 1883, 'user' => '', 'password' => ''],
+];
+
+// Assoziatives Array (Objekt wie "mqtt") statt Liste – ohne array_is_list (erst ab PHP 8.1)
+function is_assoc($mm_a) {
+	return is_array($mm_a) && ($mm_a === [] || array_keys($mm_a) !== range(0, count($mm_a) - 1));
+}
+
+// Wie deep_merge in der Bridge: Unterobjekte (mqtt) zusammenführen, Listen und Werte komplett ersetzen
+function merge_defaults($mm_base, $mm_over) {
+	foreach ($mm_over as $mm_k => $mm_v) {
+		if (isset($mm_base[$mm_k]) && $mm_base[$mm_k] !== [] && is_assoc($mm_base[$mm_k]) && is_assoc($mm_v)) {
+			$mm_base[$mm_k] = merge_defaults($mm_base[$mm_k], $mm_v);
+		} else {
+			$mm_base[$mm_k] = $mm_v;
+		}
+	}
+	return $mm_base;
+}
+
 function read_config($mm_file) {
+	global $mm_defaults;
 	$mm_cfg = json_decode(@file_get_contents($mm_file), true);
-	return is_array($mm_cfg) ? $mm_cfg : [];
+	return merge_defaults($mm_defaults, is_array($mm_cfg) ? $mm_cfg : []);
 }
 
 function service($mm_cmd) {
