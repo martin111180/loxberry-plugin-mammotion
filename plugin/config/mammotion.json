@@ -6,6 +6,7 @@
   "topic": "mammotion",
   "problem_modes": [17, 18, 23, 37, 38],
   "error_hold_minutes": 60,
+  "problem_delay_seconds": 60,
   "ignore_error_codes": [1307],
   "offline_problem_minutes": 30,
   "republish_seconds": 300,

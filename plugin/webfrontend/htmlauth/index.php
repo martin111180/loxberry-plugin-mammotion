@@ -19,6 +19,7 @@ $mm_defaults = [
 	'topic' => 'mammotion',
 	'problem_modes' => [17, 18, 23, 37, 38],
 	'error_hold_minutes' => 60,
+	'problem_delay_seconds' => 60,
 	'ignore_error_codes' => [1307],
 	'offline_problem_minutes' => 30,
 	'republish_seconds' => 300,
@@ -184,7 +185,7 @@ function import_settings($mm_json, $mm_old) {
 	foreach (['problem_modes', 'ignore_error_codes'] as $mm_k) {
 		if (isset($mm_in[$mm_k])) $mm_new[$mm_k] = int_list($mm_in[$mm_k]);
 	}
-	foreach (['error_hold_minutes', 'offline_problem_minutes', 'refresh_seconds', 'republish_seconds'] as $mm_k) {
+	foreach (['error_hold_minutes', 'problem_delay_seconds', 'offline_problem_minutes', 'refresh_seconds', 'republish_seconds'] as $mm_k) {
 		if (isset($mm_in[$mm_k])) $mm_new[$mm_k] = max(0, (int)$mm_in[$mm_k]);
 	}
 	if (isset($mm_in['loglevel']) && in_array($mm_in['loglevel'], ['DEBUG', 'INFO', 'WARNING', 'ERROR'], true)) {
@@ -240,7 +241,7 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
 		$mm_cfg['problem_modes'] = array_values(array_unique(array_map('intval', $mm_modes)));
 		$mm_ignore = array_filter(array_map('trim', explode(',', $_POST['ignore_error_codes'] ?? '')), 'is_numeric');
 		$mm_cfg['ignore_error_codes'] = array_values(array_unique(array_map(fn($c) => abs((int)$c), $mm_ignore)));
-		foreach (['error_hold_minutes', 'offline_problem_minutes', 'refresh_seconds', 'republish_seconds'] as $mm_k) {
+		foreach (['error_hold_minutes', 'problem_delay_seconds', 'offline_problem_minutes', 'refresh_seconds', 'republish_seconds'] as $mm_k) {
 			$mm_cfg[$mm_k] = max(0, intval($_POST[$mm_k] ?? 0));
 		}
 		$mm_cfg['loglevel'] = in_array($_POST['loglevel'] ?? '', ['DEBUG', 'INFO', 'WARNING', 'ERROR']) ? $_POST['loglevel'] : 'INFO';
@@ -475,6 +476,9 @@ LBWeb::lbheader(tr('UI.TITLE'), "", "");
 		<?php endforeach; ?>
 	</fieldset>
 	<p class="mm-hint"><?= t('UI.PROBLEM_MODES_HINT') ?></p>
+	<label for="problem_delay_seconds"><?= t('UI.PROBLEM_DELAY') ?></label>
+	<input type="number" id="problem_delay_seconds" name="problem_delay_seconds" min="0" value="<?= h($mm_cfg['problem_delay_seconds']) ?>">
+	<p class="mm-hint"><?= t('UI.PROBLEM_DELAY_HINT') ?></p>
 	<label for="error_hold_minutes"><?= t('UI.ERROR_HOLD') ?></label>
 	<input type="number" id="error_hold_minutes" name="error_hold_minutes" min="0" value="<?= h($mm_cfg['error_hold_minutes'] ?? 60) ?>">
 	<label for="ignore_error_codes"><?= t('UI.IGNORE_CODES') ?></label>

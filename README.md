@@ -70,6 +70,8 @@ Alle Werte werden *retained* gesendet.
   erlischt, sobald der Mäher danach wieder normal arbeitet (Bereit, Mäht, Fährt zur Station, Lädt),
   quittiert wird oder die Haltezeit abläuft. Codes in „Fehlercodes ignorieren“ (Standard: 1307 =
   erfolgreich angedockt) gelten nie als Problem.
+* **Verzögerung** (Standard 60 s): Ein Fehlercode zählt nur, wenn der Mäher danach nicht normal weiterarbeitet;
+  ein Problem-Status muss die ganze Zeit anhalten. Kurze Fehler, nach denen er weitermäht, lösen keinen Alarm aus.
 * der Mäher ist länger als X Minuten offline (einstellbar, 0 = aus)
 * die Cloud-Anmeldung funktioniert nicht
 

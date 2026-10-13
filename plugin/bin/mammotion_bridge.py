@@ -67,6 +67,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
     # 37 Positionsfehler, 38 Grenzüberschreitung
     "problem_modes": [17, 18, 23, 37, 38],
     "error_hold_minutes": 60,
+    # Problem erst melden, wenn es so lange anhält (kurze Fehler, nach denen der Mäher weitermäht, ignorieren)
+    "problem_delay_seconds": 60,
     # Fehlercodes, die nie als Problem gemeldet werden (1307 = erfolgreich angedockt, eine Info)
     "ignore_error_codes": [1307],
     "offline_problem_minutes": 30,
@@ -387,6 +389,13 @@ class MowerState:
         self.error_source = ""
         # Gerätestatus beim Fehler (None = noch nicht ausgewertet)
         self.error_mode: int | None = None
+        # Fehler hat sich nach der Verzögerung bestätigt (Mäher arbeitet nicht normal weiter)
+        self.error_confirmed = False
+        # Seit wann der Mäher in einem Problem-Status ist, und in welchem
+        self.mode_problem_since: float | None = None
+        self.mode_problem_mode: int | None = None
+        # geplante Nachprüfung nach Ablauf der Verzögerung
+        self.recheck: asyncio.TimerHandle | None = None
         self.offline_since: float | None = None
         # Seit wann auf die erste Statusmeldung gewartet wird (None = Meldung liegt vor)
         self.waiting_since: float | None = None
@@ -398,6 +407,7 @@ class MowerState:
         self.error_time = int(when)
         self.error_source = source
         self.error_mode = None
+        self.error_confirmed = False
         log.warning("%s: Fehler %s (%s) – %s", self.name, self.error_code, source, error_text(self.error_code, "de"))
 
     def clear_error(self, reason: str) -> None:
@@ -407,6 +417,7 @@ class MowerState:
         self.error_time = 0
         self.error_source = ""
         self.error_mode = None
+        self.error_confirmed = False
 
 
 class Bridge:
@@ -622,16 +633,44 @@ class Bridge:
         elif state.baseline_error is None and codes:
             state.baseline_error = (0, 0)
 
-        # Gespeicherten Fehler automatisch quittieren
+        delay = int(self.cfg.get("problem_delay_seconds") or 0)
+        pending: list[float] = []  # Sekunden bis zur nächsten nötigen Nachprüfung
+
+        # Gemeldeten Fehler erst nach der Verzögerung bestätigen, danach automatisch quittieren
         if state.error_code:
             if state.error_mode is None:
                 state.error_mode = mode
-            if hold and now - state.error_time > hold:
+            age = now - state.error_time
+            if hold and age > hold:
                 state.clear_error("Haltezeit abgelaufen")
+            elif not state.error_confirmed:
+                if delay and age < delay:
+                    pending.append(delay - age)
+                elif delay and mode in NORMAL_MODES:
+                    state.clear_error(
+                        f"ohne Auswirkung – Mäher nach {int(age)} s im normalen Betrieb: {MODE_TEXT_DE.get(mode, mode)}"
+                    )
+                else:
+                    state.error_confirmed = True
+                    state.error_mode = mode  # ab jetzt quittiert jeder Wechsel in den normalen Betrieb
+                    log.warning("%s: Fehler %s bestätigt (Status %s)", name, state.error_code, MODE_TEXT_DE.get(mode, mode))
             elif mode in NORMAL_MODES and mode != state.error_mode:
                 state.clear_error(f"Mäher wieder im normalen Betrieb: {MODE_TEXT_DE.get(mode, mode)}")
-            elif mode in RECOVERED_MODES and now - state.error_time > 120:
+            elif mode in RECOVERED_MODES and age > 120:
                 state.clear_error("Mäher arbeitet wieder")
+
+        # Problem-Status erst melden, wenn er die Verzögerung lang anhält
+        mode_problem = False
+        if mode in self.problem_modes:
+            if state.mode_problem_since is None or state.mode_problem_mode != mode:
+                state.mode_problem_since, state.mode_problem_mode = now, mode
+            waited = now - state.mode_problem_since
+            if waited >= delay:
+                mode_problem = True
+            else:
+                pending.append(delay - waited)
+        else:
+            state.mode_problem_since = state.mode_problem_mode = None
 
         # Offline-Überwachung
         if online:
@@ -641,13 +680,17 @@ class Bridge:
 
         reasons = []
         mode_text = self.mode_text(mode)
-        if mode in self.problem_modes:
+        if mode_problem:
             reasons.append(self.txt("status", mode=mode_text))
-        if state.error_code:
+        if state.error_code and state.error_confirmed:
             reasons.append(self.txt("error", code=state.error_code, text=error_text(state.error_code, self.lang)))
         offline_limit = int(self.cfg.get("offline_problem_minutes") or 0) * 60
         if offline_limit and state.offline_since and now - state.offline_since >= offline_limit:
             reasons.append(self.txt("offline", minutes=int((now - state.offline_since) // 60)))
+
+        # Fehlerfelder erst zeigen, wenn der Fehler bestätigt ist (sonst problem 0, aber Fehlertext gesetzt)
+        shown_error = state.error_code if state.error_confirmed else 0
+        self.schedule_recheck(state, min(pending) if pending else None)
 
         work = raw.report_data.work
         values = {
@@ -659,10 +702,10 @@ class Bridge:
             "progress": int(getattr(work, "mow_percent", 0) or 0),
             "problem": bool(reasons),
             "problem_text": "; ".join(reasons) if reasons else "OK",
-            "error_code": state.error_code,
-            "error_text": error_text(state.error_code, self.lang) if state.error_code else "",
-            "error_solution": error_solution(state.error_code, self.lang) if state.error_code else "",
-            "error_time": state.error_time,
+            "error_code": shown_error,
+            "error_text": error_text(shown_error, self.lang) if shown_error else "",
+            "error_solution": error_solution(shown_error, self.lang) if shown_error else "",
+            "error_time": state.error_time if shown_error else 0,
             "last_report": int(now - handle.report_data_age) if handle.last_report_data_at else 0,
         }
         if values.get("problem") != state.last_values.get("problem"):
@@ -697,6 +740,14 @@ class Bridge:
             self.mqtt.publish(f"{state.key}/problem", True)
             self.mqtt.publish(f"{state.key}/problem_text", text)
         self.publish_summary()
+
+    def schedule_recheck(self, state: MowerState, seconds: float | None) -> None:
+        """Nach Ablauf einer Verzögerung erneut auswerten (statt auf den 30-s-Takt zu warten)."""
+        if state.recheck is not None:
+            state.recheck.cancel()
+            state.recheck = None
+        if seconds is not None:
+            state.recheck = self.loop.call_later(seconds + 0.5, self.evaluate, state.name)
 
     def is_ignored(self, code: int, name: str) -> bool:
         ignored = {abs(int(c)) for c in self.cfg.get("ignore_error_codes") or []}
