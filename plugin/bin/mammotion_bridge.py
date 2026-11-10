@@ -11,6 +11,7 @@ Topics (Basis-Topic standardmäßig "mammotion", <dev> = bereinigter Gerätename
     <base>/problem_text               Text der Sammelmeldung
     <base>/bridge/status              online / offline (Last Will)
     <base>/bridge/connected           1 = Cloud-Login OK
+    <base>/paused                     1 = Winterpause (Mäher abgebaut, keine Cloud-Abfrage)
     <base>/<dev>/online               1/0
     <base>/<dev>/battery              Akkustand in %
     <base>/<dev>/charging             1 = lädt
@@ -58,6 +59,8 @@ LBHOMEDIR = os.environ.get("LBHOMEDIR", "REPLACELBHOMEDIR")  # Platzhalter, erse
 
 DEFAULT_CONFIG: dict[str, Any] = {
     "enabled": True,
+    # Winterpause: Mäher ist abgebaut – keine Cloud-Anmeldung, kein Problem melden
+    "paused": False,
     "account": "",
     "password": "",
     "language": "de",
@@ -165,6 +168,7 @@ TEXTS = {
         "login_rejected": "Mammotion-Login abgelaufen/abgelehnt",
         "no_account": "Mammotion-Konto oder Passwort nicht konfiguriert",
         "relogin": "Mammotion-Cloud verlangt eine neue Anmeldung",
+        "paused": "Winterpause",
     },
     "en": {
         "status": "State: {mode}",
@@ -175,6 +179,7 @@ TEXTS = {
         "login_rejected": "Mammotion login expired/rejected",
         "no_account": "Mammotion account or password not configured",
         "relogin": "Mammotion cloud requires a new login",
+        "paused": "Winter break",
     },
 }
 
@@ -426,6 +431,7 @@ class Bridge:
         self.status_file = status_file
         self.base = cfg["topic"].strip("/") or "mammotion"
         self.lang = cfg.get("language", "de")
+        self.paused = bool(cfg.get("paused"))
         self.problem_modes = {int(m) for m in cfg.get("problem_modes", [])}
         self.loop = asyncio.get_running_loop()
         self.mqtt = MqttPublisher(cfg, self.base, self.loop, self.handle_command)
@@ -443,6 +449,8 @@ class Bridge:
     async def run(self) -> None:
         self.mqtt.start()
         self.publish_bridge()
+        if self.paused:
+            await self.run_paused()
         backoff = 60
         while not self.stop_event.is_set():
             try:
@@ -477,6 +485,49 @@ class Bridge:
         self.connected = False
         self.publish_bridge()
         self.mqtt.stop()
+
+    async def run_paused(self) -> None:
+        """Winterpause: keine Cloud-Anmeldung. Die bekannten Mäher zeigen „Winterpause“ statt eines Problems."""
+        log.info("Winterpause aktiv – keine Anmeldung bei der Mammotion-Cloud, es wird kein Problem gemeldet")
+        text = self.txt("paused")
+        for name, values in self.known_devices().items():
+            state = MowerState(name)
+            # Übrige Werte (Akku, Fortschritt …) bleiben auf dem letzten Stand vor der Pause
+            state.last_values = {
+                **values,
+                "online": False,
+                "mode": 0,
+                "mode_text": text,
+                "problem": False,
+                "problem_text": text,
+                "error_code": 0,
+                "error_text": "",
+                "error_solution": "",
+                "error_time": 0,
+            }
+            self.mowers[name] = state
+            for key in ("online", "mode", "mode_text", "problem", "problem_text", "error_code", "error_text", "error_solution", "error_time"):
+                self.mqtt.publish(f"{state.key}/{key}", state.last_values[key])
+        self.publish_summary()
+        while not self.stop_event.is_set():
+            now = time.time()
+            if now - self.last_republish >= int(self.cfg.get("republish_seconds") or 300):
+                self.last_republish = now
+                self.mqtt.republish_all()
+            self.write_status()
+            try:
+                await asyncio.wait_for(self.stop_event.wait(), timeout=30)
+            except TimeoutError:
+                pass
+
+    def known_devices(self) -> dict[str, dict]:
+        """Mäher und ihre letzten Werte aus der Statusdatei des vorigen Laufs (ohne Cloud bekannt)."""
+        try:
+            with open(self.status_file, encoding="utf-8") as fh:
+                devices = json.load(fh).get("devices") or {}
+            return {str(name): dict(dev.get("values") or {}) for name, dev in devices.items() if isinstance(dev, dict)}
+        except (OSError, ValueError, AttributeError, TypeError):
+            return {}
 
     async def login(self) -> None:
         account, password = self.cfg.get("account"), self.cfg.get("password")
@@ -768,6 +819,7 @@ class Bridge:
         self.mqtt.publish("bridge/connected", self.connected)
         self.mqtt.publish("bridge/problem", bool(self.bridge_problem))
         self.mqtt.publish("bridge/problem_text", self.bridge_problem or "OK")
+        self.mqtt.publish("paused", self.paused)
         self.publish_summary()
 
     def publish_summary(self) -> None:
@@ -778,7 +830,8 @@ class Bridge:
             if state.last_values.get("problem"):
                 texts.append(f"{state.name}: {state.last_values['problem_text']}")
         self.mqtt.publish("problem", bool(texts))
-        self.mqtt.publish("problem_text", " | ".join(texts) if texts else "OK")
+        ok_text = self.txt("paused") if self.paused else "OK"
+        self.mqtt.publish("problem_text", " | ".join(texts) if texts else ok_text)
 
     # --- Befehle --------------------------------------------------------------
 
@@ -806,6 +859,7 @@ class Bridge:
             "updated": int(time.time()),
             "base_topic": self.base,
             "connected": self.connected,
+            "paused": self.paused,
             "bridge_problem": self.bridge_problem,
             "devices": {
                 s.name: {

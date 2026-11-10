@@ -42,6 +42,7 @@ schickt die Werte an den Loxone Miniserver.
 | `mammotion/problem_text` | Beschreibung, sonst `OK` |
 | `mammotion/bridge/status` | `online` / `offline` (Last Will – Plugin abgestürzt/gestoppt) |
 | `mammotion/bridge/connected` | 1 = Cloud-Login ok |
+| `mammotion/paused` | 1 = Winterpause (Mäher abgebaut) |
 | `mammotion/<dev>/problem` | 1 = Problem bei diesem Mäher |
 | `mammotion/<dev>/problem_text` | z. B. `Status: Gesperrt; Fehler 1301: …` |
 | `mammotion/<dev>/error_code` | letzter neuer Fehlercode (0 = keiner) |
@@ -61,6 +62,13 @@ Alle Werte werden *retained* gesendet.
 * `mammotion/cmd/reset` – gespeicherte Fehler aller Mäher quittieren
 * `mammotion/<dev>/cmd/reset` – Fehler eines Mähers quittieren
 * `mammotion/cmd/refresh` – Status sofort anfordern
+
+## Winterpause
+
+Ist der Mäher über den Winter abgebaut, in den Einstellungen **Winterpause** anhaken. Die Bridge meldet sich
+dann nicht bei Mammotion an und meldet kein Problem. `mammotion/paused` ist 1, `mode_text` und `problem_text`
+des Mähers zeigen „Winterpause“, `mode` steht auf 0, `problem` auf 0. Die übrigen Werte (Akku …) bleiben auf
+dem letzten Stand. Im Frühjahr den Haken wieder entfernen.
 
 ## Wann gilt etwas als „Problem“?
 

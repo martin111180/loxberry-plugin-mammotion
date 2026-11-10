@@ -13,6 +13,7 @@ function h($s) { return htmlspecialchars((string)$s, ENT_QUOTES, 'UTF-8'); }
 // Ergänzen fehlende Einstellungen (z. B. nach Updates mit neuen Optionen), damit Oberfläche und Export vollständig sind.
 $mm_defaults = [
 	'enabled' => true,
+	'paused' => false,
 	'account' => '',
 	'password' => '',
 	'language' => 'de',
@@ -172,7 +173,7 @@ function import_settings($mm_json, $mm_old) {
 	}
 	$mm_in = $mm_data['settings'];
 	$mm_new = $mm_old;
-	foreach (['enabled'] as $mm_k) {
+	foreach (['enabled', 'paused'] as $mm_k) {
 		if (array_key_exists($mm_k, $mm_in)) $mm_new[$mm_k] = (bool)$mm_in[$mm_k];
 	}
 	if (isset($mm_in['account'])) $mm_new['account'] = trim((string)$mm_in['account']);
@@ -230,6 +231,7 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
 	if ($mm_action === 'save') {
 		$mm_page = 'settings';
 		$mm_cfg['enabled']  = isset($_POST['enabled']);
+		$mm_cfg['paused']   = isset($_POST['paused']);
 		$mm_cfg['account']  = trim($_POST['account'] ?? '');
 		if (($_POST['password'] ?? '') !== '') {
 			$mm_cfg['password'] = $_POST['password'];
@@ -299,7 +301,10 @@ function render_status_table() {
 ?>
 <table class="mm-table">
 	<tr><td><?= t('UI.BRIDGE_SERVICE') ?></td><td><?= $mm_running ? '<span class="mm-ok">' . t('UI.RUNNING') . '</span>' : '<span class="mm-bad">' . t('UI.STOPPED') . '</span>' ?></td></tr>
-	<?php if ($mm_status): ?>
+	<?php if ($mm_status && !empty($mm_status['paused']) && $mm_running): ?>
+	<tr><td><?= t('UI.CLOUD') ?></td><td><?= t('UI.CLOUD_PAUSED') ?></td></tr>
+	<tr><td><?= t('UI.LAST_UPDATE') ?></td><td><?= h(date_fmt($mm_status['updated'] ?? 0)) ?></td></tr>
+	<?php elseif ($mm_status): ?>
 	<tr><td><?= t('UI.CLOUD') ?></td><td><?= !empty($mm_status['connected']) ? '<span class="mm-ok">' . t('UI.CONNECTED') . '</span>' : '<span class="mm-bad">' . t('UI.NOT_CONNECTED') . '</span>' ?>
 		<?= !empty($mm_status['bridge_problem']) ? '<br>' . h($mm_status['bridge_problem']) : '' ?></td></tr>
 	<tr><td><?= t('UI.LAST_UPDATE') ?></td><td><?= h(date_fmt($mm_status['updated'] ?? 0)) ?></td></tr>
@@ -309,12 +314,16 @@ function render_status_table() {
 }
 
 function render_devices() {
-	global $mm_status, $mm_topic;
+	global $mm_status, $mm_topic, $mm_running;
+	$mm_paused = !empty($mm_status['paused']) && $mm_running;
 ?>
+<?php if ($mm_paused): ?>
+<div class="mm-msg mm-msg-wait"><?= t('UI.PAUSE_ACTIVE') ?></div>
+<?php endif; ?>
 <?php if (!empty($mm_status['devices'])): foreach ($mm_status['devices'] as $mm_name => $mm_dev): $mm_v = $mm_dev['values'] ?? []; ?>
 <h3><?= h($mm_name) ?></h3>
 <?php $mm_wait = (int)($mm_dev['waiting_seconds'] ?? 0);
-if (!empty($mm_dev['waiting']) || $mm_wait > 0 || !$mm_v): ?>
+if (!$mm_paused && (!empty($mm_dev['waiting']) || $mm_wait > 0 || !$mm_v)): ?>
 <div class="mm-msg mm-msg-wait"><?= t('UI.WAITING') ?><?= $mm_wait > 0 ? ' ' . t('UI.WAITING_SINCE', $mm_wait < 120 ? $mm_wait . ' s' : intdiv($mm_wait, 60) . ' min') : '' ?>.
 	<?= $mm_v ? t('UI.WAITING_OLD_VALUES') : t('UI.WAITING_NO_VALUES') ?></div>
 <?php endif; ?>
@@ -337,6 +346,9 @@ if (!empty($mm_dev['waiting']) || $mm_wait > 0 || !$mm_v): ?>
 // Schneller nachladen, solange noch auf eine Statusmeldung gewartet wird
 function live_waiting() {
 	global $mm_status;
+	if (!empty($mm_status['paused'])) {
+		return false;
+	}
 	if (empty($mm_status['devices'])) {
 		return true;
 	}
@@ -455,6 +467,8 @@ LBWeb::lbheader(tr('UI.TITLE'), "", "");
 	<input type="hidden" name="action" value="save">
 
 	<label><input type="checkbox" name="enabled" <?= !empty($mm_cfg['enabled']) ? 'checked' : '' ?>> <?= t('UI.ENABLED') ?></label>
+	<label><input type="checkbox" name="paused" <?= !empty($mm_cfg['paused']) ? 'checked' : '' ?>> <?= t('UI.PAUSED') ?></label>
+	<p class="mm-hint"><?= t('UI.PAUSED_HINT') ?></p>
 
 	<h3><?= t('UI.ACCOUNT') ?></h3>
 	<label for="account"><?= t('UI.ACCOUNT_EMAIL') ?></label>
